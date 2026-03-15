@@ -8,8 +8,27 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/samber/lo"
 )
+
+func sanitizeReservedToolName(info *relaycommon.RelayInfo, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return name
+	}
+	if !strings.HasPrefix(name, "mcp__") {
+		return name
+	}
+	safeName := "tool_" + name
+	if info != nil {
+		if info.ToolNameAliases == nil {
+			info.ToolNameAliases = make(map[string]string)
+		}
+		info.ToolNameAliases[safeName] = name
+	}
+	return safeName
+}
 
 func normalizeChatImageURLToString(v any) any {
 	switch vv := v.(type) {
@@ -73,7 +92,7 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) jso
 	return textRaw
 }
 
-func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
+func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest, info *relaycommon.RelayInfo) (*dto.OpenAIResponsesRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
 	}
@@ -175,7 +194,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 					inputItems = append(inputItems, map[string]any{
 						"type":      "function_call",
 						"call_id":   tc.ID,
-						"name":      name,
+						"name":      sanitizeReservedToolName(info, name),
 						"arguments": tc.Function.Arguments,
 					})
 				}
@@ -202,7 +221,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 					inputItems = append(inputItems, map[string]any{
 						"type":      "function_call",
 						"call_id":   tc.ID,
-						"name":      name,
+						"name":      sanitizeReservedToolName(info, name),
 						"arguments": tc.Function.Arguments,
 					})
 				}
@@ -267,7 +286,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				inputItems = append(inputItems, map[string]any{
 					"type":      "function_call",
 					"call_id":   tc.ID,
-					"name":      name,
+					"name":      sanitizeReservedToolName(info, name),
 					"arguments": tc.Function.Arguments,
 				})
 			}
@@ -293,7 +312,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 			case "function":
 				tools = append(tools, map[string]any{
 					"type":        "function",
-					"name":        tool.Function.Name,
+					"name":        sanitizeReservedToolName(info, tool.Function.Name),
 					"description": tool.Function.Description,
 					"parameters":  tool.Function.Parameters,
 				})
@@ -330,13 +349,13 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				if name, ok := m["name"].(string); ok && name != "" {
 					toolChoiceRaw, _ = common.Marshal(map[string]any{
 						"type": "function",
-						"name": name,
+						"name": sanitizeReservedToolName(info, name),
 					})
 				} else if fn, ok := m["function"].(map[string]any); ok {
 					if name, ok := fn["name"].(string); ok && name != "" {
 						toolChoiceRaw, _ = common.Marshal(map[string]any{
 							"type": "function",
-							"name": name,
+							"name": sanitizeReservedToolName(info, name),
 						})
 					} else {
 						toolChoiceRaw, _ = common.Marshal(v)

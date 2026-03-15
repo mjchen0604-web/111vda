@@ -38,6 +38,17 @@ func stringDeltaFromPrefix(prev string, next string) string {
 	return next
 }
 
+func restoreReservedToolName(info *relaycommon.RelayInfo, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || info == nil || info.ToolNameAliases == nil {
+		return name
+	}
+	if original, ok := info.ToolNameAliases[name]; ok && strings.TrimSpace(original) != "" {
+		return original
+	}
+	return name
+}
+
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
@@ -60,7 +71,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	chatId := helper.GetResponseID(c)
-	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(&responsesResp, chatId)
+	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(&responsesResp, chatId, info)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -398,7 +409,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 			name := strings.TrimSpace(streamResp.Item.Name)
 			if name != "" {
-				toolCallNameByID[callID] = name
+				toolCallNameByID[callID] = restoreReservedToolName(info, name)
 			}
 
 			newArgs := streamResp.Item.Arguments
@@ -413,7 +424,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				toolCallArgsByID[callID] = newArgs
 			}
 
-			if !sendToolCallDelta(callID, name, argsDelta) {
+			if !sendToolCallDelta(callID, restoreReservedToolName(info, name), argsDelta) {
 				return false
 			}
 

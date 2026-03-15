@@ -5,9 +5,21 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
-func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesResponse, id string) (*dto.OpenAITextResponse, *dto.Usage, error) {
+func restoreReservedToolName(info *relaycommon.RelayInfo, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || info == nil || info.ToolNameAliases == nil {
+		return name
+	}
+	if original, ok := info.ToolNameAliases[name]; ok && strings.TrimSpace(original) != "" {
+		return original
+	}
+	return name
+}
+
+func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesResponse, id string, info *relaycommon.RelayInfo) (*dto.OpenAITextResponse, *dto.Usage, error) {
 	if resp == nil {
 		return nil, nil, errors.New("response is nil")
 	}
@@ -51,6 +63,7 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 			if name == "" {
 				continue
 			}
+			name = restoreReservedToolName(info, name)
 			callId := strings.TrimSpace(out.CallId)
 			if callId == "" {
 				callId = strings.TrimSpace(out.ID)
