@@ -36,6 +36,28 @@ export const useApiRequest = (
 ) => {
   const { t } = useTranslation();
 
+  const buildSessionHeaders = useCallback((payload) => {
+    const metadata =
+      payload &&
+      typeof payload === 'object' &&
+      payload.metadata &&
+      typeof payload.metadata === 'object' &&
+      !Array.isArray(payload.metadata)
+        ? payload.metadata
+        : {};
+    const sessionId =
+      metadata.session_id ||
+      metadata.conversation_id ||
+      payload?.prompt_cache_key;
+    if (!sessionId || typeof sessionId !== 'string') {
+      return {};
+    }
+    return {
+      'X-Session-Id': sessionId,
+      'X-Conversation-Id': sessionId,
+    };
+  }, []);
+
   const applyAutoCollapseLogic = useCallback((message, isThinkingComplete = true) => {
     const shouldAutoCollapse = isThinkingComplete && !message.hasAutoCollapsed;
     return {
@@ -154,6 +176,7 @@ export const useApiRequest = (
           headers: {
             'Content-Type': 'application/json',
             'New-Api-User': getUserIdFromLocalStorage(),
+            ...buildSessionHeaders(payload),
           },
           body: JSON.stringify(payload),
         });
@@ -231,7 +254,14 @@ export const useApiRequest = (
         });
       }
     },
-    [setMessage, setDebugData, setActiveDebugTab, t, applyAutoCollapseLogic],
+    [
+      setMessage,
+      setDebugData,
+      setActiveDebugTab,
+      t,
+      applyAutoCollapseLogic,
+      buildSessionHeaders,
+    ],
   );
 
   const handleSSE = useCallback(
@@ -250,6 +280,7 @@ export const useApiRequest = (
         headers: {
           'Content-Type': 'application/json',
           'New-Api-User': getUserIdFromLocalStorage(),
+          ...buildSessionHeaders(payload),
         },
         method: 'POST',
         payload: JSON.stringify(payload),
@@ -367,7 +398,15 @@ export const useApiRequest = (
         completeMessage(MESSAGE_STATUS.ERROR);
       }
     },
-    [sseSourceRef, setDebugData, setActiveDebugTab, streamMessageUpdate, completeMessage, t],
+    [
+      sseSourceRef,
+      setDebugData,
+      setActiveDebugTab,
+      streamMessageUpdate,
+      completeMessage,
+      t,
+      buildSessionHeaders,
+    ],
   );
 
   const onStopGenerator = useCallback(() => {

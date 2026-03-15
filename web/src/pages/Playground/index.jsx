@@ -32,6 +32,7 @@ import { useSyncMessageAndCustomBody } from '../../hooks/playground/useSyncMessa
 import { MESSAGE_ROLES } from '../../constants/playground.constants';
 import {
   API,
+  applyConversationSessionToPayload,
   buildApiPayload,
   buildMessageContent,
   createLoadingAssistantMessage,
@@ -112,12 +113,14 @@ const Playground = () => {
     models,
     groups,
     message,
+    conversationSessionId,
     sseSourceRef,
     chatRef,
     handleInputChange,
     handleParameterToggle,
     debouncedSaveConfig,
     saveMessagesImmediately,
+    resetConversationSession,
     handleConfigImport,
     handleConfigReset,
     applyRemoteDefaults,
@@ -280,6 +283,7 @@ const Playground = () => {
     setMessage,
     inputs,
     parameterEnabled,
+    conversationSessionId,
     sendRequest,
     saveMessagesImmediately,
   );
@@ -298,7 +302,10 @@ const Playground = () => {
     try {
       if (canUseCustomRequest && customRequestMode && customRequestBody.trim()) {
         try {
-          return JSON.parse(customRequestBody);
+          return applyConversationSessionToPayload(
+            JSON.parse(customRequestBody),
+            conversationSessionId,
+          );
         } catch {
           // fallback to standard preview
         }
@@ -324,7 +331,7 @@ const Playground = () => {
       if (inputs.promptMode === 'native' && inputs.systemPrompt?.trim()) {
         payload.system_prompt = inputs.systemPrompt.trim();
       }
-      return payload;
+      return applyConversationSessionToPayload(payload, conversationSessionId);
     } catch (error) {
       console.error('构造预览请求体失败:', error);
       return null;
@@ -333,6 +340,7 @@ const Playground = () => {
     canUseCustomRequest,
     customRequestBody,
     customRequestMode,
+    conversationSessionId,
     inputs,
     message,
     parameterEnabled,
@@ -365,7 +373,10 @@ const Playground = () => {
 
       if (canUseCustomRequest && customRequestMode && customRequestBody) {
         try {
-          const customPayload = JSON.parse(customRequestBody);
+          const customPayload = applyConversationSessionToPayload(
+            JSON.parse(customRequestBody),
+            conversationSessionId,
+          );
           setMessage((prev) => {
             const next = [...prev, userMessage, loadingMessage];
             sendRequest(customPayload, customPayload.stream !== false);
@@ -392,7 +403,11 @@ const Playground = () => {
         if (inputs.promptMode === 'native' && inputs.systemPrompt?.trim()) {
           payload.system_prompt = inputs.systemPrompt.trim();
         }
-        sendRequest(payload, inputs.stream);
+        const requestPayload = applyConversationSessionToPayload(
+          payload,
+          conversationSessionId,
+        );
+        sendRequest(requestPayload, inputs.stream);
 
         if (inputs.imageEnabled) {
           setTimeout(() => {
@@ -409,6 +424,7 @@ const Playground = () => {
       canUseCustomRequest,
       customRequestBody,
       customRequestMode,
+      conversationSessionId,
       handleInputChange,
       inputs,
       parameterEnabled,
@@ -521,9 +537,10 @@ const Playground = () => {
   }, [inputs, parameterEnabled, debouncedSaveConfig]);
 
   const handleClearMessages = useCallback(() => {
+    resetConversationSession();
     setMessage([]);
     setTimeout(() => saveMessagesImmediately([]), 0);
-  }, [setMessage, saveMessagesImmediately]);
+  }, [resetConversationSession, setMessage, saveMessagesImmediately]);
 
   const handlePasteImage = useCallback(
     (base64Data) => {

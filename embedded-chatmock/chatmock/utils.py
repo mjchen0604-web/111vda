@@ -58,6 +58,53 @@ def restore_reserved_tool_name(name: Any) -> Any:
     return normalized[len("tool_"):]
 
 
+def extract_response_output_text(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+
+    direct_text = item.get("output_text")
+    if isinstance(direct_text, str) and direct_text:
+        return direct_text
+
+    parts: List[str] = []
+    content = item.get("content")
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = part.get("type")
+            if part_type in ("output_text", "text", "summary_text"):
+                text = part.get("text")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+    if parts:
+        return "".join(parts)
+
+    output = item.get("output")
+    if isinstance(output, list):
+        nested_parts: List[str] = []
+        for output_item in output:
+            text = extract_response_output_text(output_item)
+            if text:
+                nested_parts.append(text)
+        return "".join(nested_parts)
+
+    return ""
+
+
+def merge_response_text(existing_text: str, observed_text: Any) -> Tuple[str, str]:
+    if not isinstance(observed_text, str) or not observed_text:
+        return existing_text, ""
+    if not existing_text:
+        return observed_text, observed_text
+    if observed_text.startswith(existing_text):
+        return observed_text, observed_text[len(existing_text):]
+    if existing_text.endswith(observed_text) or observed_text in existing_text:
+        return existing_text, ""
+    merged = existing_text + observed_text
+    return merged, observed_text
+
+
 class RetryableStreamError(RuntimeError):
     def __init__(self, error_info: Dict[str, Any]) -> None:
         self.error_info = error_info
@@ -1406,6 +1453,7 @@ def sse_translate_chat(
     pending_summary_paragraph = False
     upstream_usage = None
     has_visible_output = False
+    emitted_output_text = ""
     ws_state: dict[str, Any] = {}
     ws_index: dict[str, int] = {}
     ws_next_index: int = 0
@@ -1508,6 +1556,7 @@ def sse_translate_chat(
                     think_closed = True
                 saw_output = True
                 has_visible_output = True
+                emitted_output_text += delta
                 chunk = {
                     "id": response_id,
                     "object": "chat.completion.chunk",
@@ -1572,6 +1621,22 @@ def sse_translate_chat(
                         yield f"data: {json.dumps(finish_chunk)}\n\n".encode("utf-8")
                         sent_stop_chunk = True
                         sent_tool_finish = True
+                else:
+                    emitted_output_text, missing_delta = merge_response_text(
+                        emitted_output_text,
+                        extract_response_output_text(item),
+                    )
+                    if missing_delta:
+                        saw_output = True
+                        has_visible_output = True
+                        chunk = {
+                            "id": response_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model,
+                            "choices": [{"index": 0, "delta": {"content": missing_delta}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
             elif kind == "response.reasoning_summary_part.added":
                 if compat in ("think-tags", "o3"):
                     if saw_any_summary:
@@ -1671,6 +1736,21 @@ def sse_translate_chat(
             elif isinstance(kind, str) and kind.endswith(".done"):
                 pass
             elif kind == "response.output_text.done":
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    evt.get("text") or "",
+                )
+                if missing_delta:
+                    saw_output = True
+                    has_visible_output = True
+                    chunk = {
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "delta": {"content": missing_delta}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 chunk = {
                     "id": response_id,
                     "object": "chat.completion.chunk",
@@ -1680,6 +1760,23 @@ def sse_translate_chat(
                 }
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 sent_stop_chunk = True
+            elif kind == "response.content_part.done":
+                part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    part.get("text") or "",
+                )
+                if missing_delta:
+                    saw_output = True
+                    has_visible_output = True
+                    chunk = {
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "delta": {"content": missing_delta}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
             elif kind == "response.failed":
                 error_info = error_info_from_event_response(
                     getattr(upstream, "chatmock_source", "upstream"),
@@ -1707,6 +1804,21 @@ def sse_translate_chat(
                     yield f"data: {json.dumps(close_chunk)}\n\n".encode("utf-8")
                     think_open = False
                     think_closed = True
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    extract_response_output_text(evt.get("response")),
+                )
+                if missing_delta:
+                    saw_output = True
+                    has_visible_output = True
+                    chunk = {
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "delta": {"content": missing_delta}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 if not sent_stop_chunk:
                     chunk = {
                         "id": response_id,
@@ -1741,6 +1853,7 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
     response_id = "cmpl-stream"
     upstream_usage = None
     has_visible_output = False
+    emitted_output_text = ""
     
     def _extract_usage(evt: Dict[str, Any]) -> Dict[str, int] | None:
         try:
@@ -1784,6 +1897,7 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
             if kind == "response.output_text.delta":
                 delta_text = evt.get("delta") or ""
                 has_visible_output = has_visible_output or bool(delta_text)
+                emitted_output_text += delta_text
                 chunk = {
                     "id": response_id,
                     "object": "text_completion.chunk",
@@ -1793,6 +1907,20 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
                 }
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
             elif kind == "response.output_text.done":
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    evt.get("text") or "",
+                )
+                if missing_delta:
+                    has_visible_output = True
+                    chunk = {
+                        "id": response_id,
+                        "object": "text_completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "text": missing_delta, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 chunk = {
                     "id": response_id,
                     "object": "text_completion.chunk",
@@ -1801,10 +1929,56 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
                     "choices": [{"index": 0, "text": "", "finish_reason": "stop"}],
                 }
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            elif kind == "response.content_part.done":
+                part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    part.get("text") or "",
+                )
+                if missing_delta:
+                    has_visible_output = True
+                    chunk = {
+                        "id": response_id,
+                        "object": "text_completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "text": missing_delta, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            elif kind == "response.output_item.done":
+                item = evt.get("item") or {}
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    extract_response_output_text(item),
+                )
+                if missing_delta:
+                    has_visible_output = True
+                    chunk = {
+                        "id": response_id,
+                        "object": "text_completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "text": missing_delta, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
             elif kind == "response.completed":
                 m = _extract_usage(evt)
                 if m:
                     upstream_usage = m
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    extract_response_output_text(evt.get("response")),
+                )
+                if missing_delta:
+                    has_visible_output = True
+                    chunk = {
+                        "id": response_id,
+                        "object": "text_completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [{"index": 0, "text": missing_delta, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 if include_usage and upstream_usage:
                     try:
                         usage_chunk = {

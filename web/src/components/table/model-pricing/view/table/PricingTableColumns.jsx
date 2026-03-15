@@ -23,6 +23,7 @@ import { IconHelpCircle } from '@douyinfe/semi-icons';
 import {
   renderModelTag,
   stringToColor,
+  toPublicModelName,
   calculateModelPrice,
   getLongContextPricingNote,
   getModelPriceItems,
@@ -149,7 +150,7 @@ export const getPricingTableColumns = ({
     render: (text, record, index) => {
       return renderModelTag(text, {
         onClick: () => {
-          copyText(text);
+          copyText(toPublicModelName(text));
         },
       });
     },

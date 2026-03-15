@@ -40,6 +40,7 @@ import {
   formatPriceInfo,
   getLongContextPricingNote,
   getLobeHubIcon,
+  toPublicModelName,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
@@ -128,7 +129,7 @@ const PricingCardView = ({
 
     // 如果没有供应商图标，使用模型名称生成头像
 
-    const avatarText = model.model_name.slice(0, 2).toUpperCase();
+    const avatarText = toPublicModelName(model.model_name).slice(0, 2).toUpperCase();
     return (
       <div className={CARD_STYLES.container}>
         <Avatar
@@ -266,7 +267,7 @@ const PricingCardView = ({
                     {getModelIcon(model)}
                     <div className='flex-1 min-w-0'>
                       <h3 className='text-lg font-bold text-gray-900 truncate'>
-                        {model.model_name}
+                        {toPublicModelName(model.model_name)}
                       </h3>
                       <div className='flex flex-col gap-1 text-xs mt-1'>
                         {formatPriceInfo(priceData, t, siteDisplayType)}
@@ -286,7 +287,7 @@ const PricingCardView = ({
                       icon={<Copy size={12} />}
                       onClick={(e) => {
                         e.stopPropagation();
-                        copyText(model.model_name);
+                        copyText(toPublicModelName(model.model_name));
                       }}
                     />
 

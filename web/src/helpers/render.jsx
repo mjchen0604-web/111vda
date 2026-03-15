@@ -731,6 +731,16 @@ export function stringToColor(str) {
 }
 
 // 渲染带有模型图标的标签
+export function toPublicModelName(modelName) {
+  if (!modelName || typeof modelName !== 'string') return modelName;
+  let normalized = modelName;
+  normalized = normalized.replaceAll('-fast-', '-lightning-');
+  if (normalized.endsWith('-fast')) {
+    normalized = normalized.slice(0, -5) + '-lightning';
+  }
+  return normalized;
+}
+
 export function renderModelTag(modelName, options = {}) {
   const {
     color,
@@ -740,11 +750,12 @@ export function renderModelTag(modelName, options = {}) {
     suffixIcon,
   } = options;
 
+  const publicModelName = toPublicModelName(modelName);
   const categories = getModelCategories(i18next.t);
   let icon = null;
 
   for (const [key, category] of Object.entries(categories)) {
-    if (key !== 'all' && category.filter({ model_name: modelName })) {
+    if (key !== 'all' && category.filter({ model_name: publicModelName })) {
       icon = category.icon;
       break;
     }
@@ -752,14 +763,14 @@ export function renderModelTag(modelName, options = {}) {
 
   return (
     <Tag
-      color={color || stringToColor(modelName)}
+      color={color || stringToColor(publicModelName)}
       prefixIcon={icon}
       suffixIcon={suffixIcon}
       size={size}
       shape={shape}
       onClick={onClick}
     >
-      {modelName}
+      {publicModelName}
     </Tag>
   );
 }

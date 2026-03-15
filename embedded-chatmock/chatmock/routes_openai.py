@@ -15,6 +15,7 @@ from .reasoning import (
     build_reasoning_param,
     extract_reasoning_from_model_name,
     extract_service_tier_from_model_name,
+    public_model_name,
     public_service_tier_name,
 )
 from .surface_names import public_upstream_name
@@ -28,11 +29,13 @@ from .upstream_errors import (
     should_retry_next_candidate,
 )
 from .upstream import normalize_model_name, resolve_upstream_mode, start_upstream_request
-from .thread_sessions import build_thread_session_state
+from .thread_sessions import resolve_thread_session_state
 from .utils import (
     RetryableStreamError,
     convert_chat_messages_to_responses_input,
     convert_tools_chat_to_responses,
+    extract_response_output_text,
+    merge_response_text,
     restore_reserved_tool_name,
     sanitize_reserved_tool_name,
     sse_translate_chat,
@@ -85,7 +88,8 @@ def _log_fast_probe(
     upstream: Any | None = None,
     extra: Dict[str, Any] | None = None,
 ) -> None:
-    should_log = bool(requested_service_tier) or ("-fast" in str(requested_model or "").lower()) or selected_mode == "codex-app-server"
+    requested_model_text = str(requested_model or "").lower()
+    should_log = bool(requested_service_tier) or ("-fast" in requested_model_text) or ("-lightning" in requested_model_text) or selected_mode == "codex-app-server"
     if not should_log:
         return
     payload: Dict[str, Any] = {
@@ -172,42 +176,11 @@ def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None =
     return None
 
 
-def _first_non_empty(*values: Any) -> str | None:
-    for value in values:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
 def _resolve_thread_session(payload: Dict[str, Any], input_items: List[Dict[str, Any]]) -> Dict[str, Any] | None:
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-    session_key = _first_non_empty(
-        payload.get("session_id"),
-        metadata.get("session_id"),
-        payload.get("conversation_id"),
-        metadata.get("conversation_id"),
-        request.headers.get("x-session-id"),
-        request.headers.get("session_id"),
-        request.headers.get("x-conversation-id"),
-        request.headers.get("conversation_id"),
-    )
-    explicit_thread_id = _first_non_empty(
-        payload.get("thread_id"),
-        metadata.get("thread_id"),
-        request.headers.get("x-thread-id"),
-        request.headers.get("thread_id"),
-    )
-    fork_from_thread_id = _first_non_empty(
-        payload.get("fork_from_thread_id"),
-        metadata.get("fork_from_thread_id"),
-        request.headers.get("x-fork-from-thread-id"),
-        request.headers.get("fork_from_thread_id"),
-    )
-    return build_thread_session_state(
-        session_key=session_key,
+    return resolve_thread_session_state(
+        payload=payload,
         input_items=input_items,
-        explicit_thread_id=explicit_thread_id,
-        fork_from_thread_id=fork_from_thread_id,
+        headers=request.headers,
     )
 
 
@@ -315,10 +288,15 @@ def _consume_chat_completion_nonstream(
                 observed_service_tier = evt["response"].get("service_tier") or observed_service_tier
             if kind == "response.output_text.delta":
                 full_text += evt.get("delta") or ""
+            elif kind == "response.output_text.done":
+                full_text, _ = merge_response_text(full_text, evt.get("text") or "")
             elif kind == "response.reasoning_summary_text.delta":
                 reasoning_summary_text += evt.get("delta") or ""
             elif kind == "response.reasoning_text.delta":
                 reasoning_full_text += evt.get("delta") or ""
+            elif kind == "response.content_part.done":
+                part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
+                full_text, _ = merge_response_text(full_text, part.get("text") or "")
             elif kind == "response.output_item.done":
                 item = evt.get("item") or {}
                 if isinstance(item, dict) and item.get("type") == "function_call":
@@ -338,6 +316,8 @@ def _consume_chat_completion_nonstream(
                                 "function": {"name": restore_reserved_tool_name(name), "arguments": args},
                             }
                         )
+                else:
+                    full_text, _ = merge_response_text(full_text, extract_response_output_text(item))
             elif kind == "response.failed":
                 error_info = error_info_from_event_response(
                     getattr(upstream, "chatmock_source", "upstream"),
@@ -346,6 +326,10 @@ def _consume_chat_completion_nonstream(
                 )
                 error_message = error_info.get("raw_message") or "response.failed"
             elif kind == "response.completed":
+                full_text, _ = merge_response_text(
+                    full_text,
+                    extract_response_output_text(evt.get("response")),
+                )
                 completed_ok = True
                 break
     finally:
@@ -442,6 +426,14 @@ def _consume_text_completion_nonstream(
             kind = evt.get("type")
             if kind == "response.output_text.delta":
                 full_text += evt.get("delta") or ""
+            elif kind == "response.output_text.done":
+                full_text, _ = merge_response_text(full_text, evt.get("text") or "")
+            elif kind == "response.content_part.done":
+                part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
+                full_text, _ = merge_response_text(full_text, part.get("text") or "")
+            elif kind == "response.output_item.done":
+                item = evt.get("item") or {}
+                full_text, _ = merge_response_text(full_text, extract_response_output_text(item))
             elif kind == "response.failed":
                 error_info = error_info_from_event_response(
                     getattr(upstream, "chatmock_source", "upstream"),
@@ -450,6 +442,10 @@ def _consume_text_completion_nonstream(
                 )
                 error_message = error_info.get("raw_message") or "response.failed"
             elif kind == "response.completed":
+                full_text, _ = merge_response_text(
+                    full_text,
+                    extract_response_output_text(evt.get("response")),
+                )
                 completed_ok = True
                 break
     finally:
@@ -873,7 +869,7 @@ def chat_completions() -> Response:
         **({"usage": usage_obj} if usage_obj else {}),
     }
     if observed_service_tier:
-        completion["service_tier"] = observed_service_tier
+        completion["service_tier"] = public_service_tier_name(observed_service_tier)
     if verbose:
         _log_json("OUT POST /v1/chat/completions", completion)
     resp = make_response(jsonify(completion), upstream.status_code)
@@ -1161,7 +1157,7 @@ def completions() -> Response:
         **({"usage": usage_obj} if usage_obj else {}),
     }
     if observed_service_tier:
-        completion["service_tier"] = observed_service_tier
+        completion["service_tier"] = public_service_tier_name(observed_service_tier)
     if verbose:
         _log_json("OUT POST /v1/completions", completion)
     resp = make_response(jsonify(completion), upstream.status_code)
@@ -1189,7 +1185,7 @@ def list_models() -> Response:
         ("gpt-5.1", ["high", "medium", "low"]),
         ("gpt-5.2", ["xhigh", "high", "medium", "low"]),
         ("gpt-5.4", ["xhigh", "high", "medium", "low"]),
-        ("gpt-5.4-fast", ["xhigh", "high", "medium", "low"]),
+        ("gpt-5.4-lightning", ["xhigh", "high", "medium", "low"]),
         ("gpt-5.3-codex", ["xhigh", "high", "medium", "low"]),
         ("gpt-5-codex", ["high", "medium", "low"]),
         ("gpt-5.2-codex", ["xhigh", "high", "medium", "low"]),
@@ -1202,7 +1198,10 @@ def list_models() -> Response:
         model_ids.append(base)
         if expose_variants:
             model_ids.extend([f"{base}-{effort}" for effort in efforts])
-    data = [{"id": mid, "object": "model", "owned_by": "owner"} for mid in model_ids]
+    data = [
+        {"id": public_model_name(mid), "object": "model", "owned_by": "owner"}
+        for mid in model_ids
+    ]
     models = {"object": "list", "data": data}
     resp = make_response(jsonify(models), 200)
     for k, v in build_cors_headers().items():

@@ -14,6 +14,7 @@ from .reasoning import (
     build_reasoning_param,
     extract_reasoning_from_model_name,
     extract_service_tier_from_model_name,
+    public_service_tier_name,
 )
 from .upstream_errors import (
     build_anthropic_error_response,
@@ -24,6 +25,7 @@ from .upstream_errors import (
     should_retry_next_candidate,
 )
 from .upstream import normalize_model_name, resolve_upstream_mode, start_upstream_request
+from .thread_sessions import resolve_thread_session_state
 from .utils import restore_reserved_tool_name, sanitize_reserved_tool_name
 
 
@@ -564,6 +566,11 @@ def messages() -> Response:
     model_reasoning = extract_reasoning_from_model_name(requested_model)
     reasoning_overrides = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else model_reasoning
     service_tier = _resolve_service_tier(payload, requested_model)
+    thread_session = resolve_thread_session_state(
+        payload=payload,
+        input_items=input_items,
+        headers=request.headers,
+    )
     reasoning_param = build_reasoning_param(
         reasoning_effort,
         reasoning_summary,
@@ -586,6 +593,7 @@ def messages() -> Response:
             parallel_tool_calls=parallel_tool_calls,
             reasoning_param=reasoning_param,
             service_tier=service_tier,
+            thread_session=thread_session,
         )
         if error_resp is not None:
             error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
@@ -727,7 +735,7 @@ def messages() -> Response:
         "usage": {"input_tokens": usage_in, "output_tokens": usage_out},
     }
     if observed_service_tier:
-        message_obj["service_tier"] = observed_service_tier
+        message_obj["service_tier"] = public_service_tier_name(observed_service_tier)
     if verbose:
         _log_json("OUT POST /v1/messages", message_obj)
 

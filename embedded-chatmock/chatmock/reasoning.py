@@ -36,10 +36,13 @@ def split_model_alias(model: str | None) -> tuple[str, str | None, str | None]:
                 break
 
     for sep in ("-", "_"):
-        fast_suffix = f"{sep}fast"
-        if base.endswith(fast_suffix):
-            base = base[: -len(fast_suffix)]
-            service_tier = "fast"
+        for tier_suffix in ("fast", "lightning"):
+            suffix = f"{sep}{tier_suffix}"
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                service_tier = "fast"
+                break
+        if service_tier is not None:
             break
 
     return base, effort, service_tier
@@ -151,6 +154,16 @@ def public_service_tier_name(service_tier: str | None) -> str | None:
     if not isinstance(service_tier, str) or not service_tier.strip():
         return None
     normalized = service_tier.strip().lower()
-    if normalized == "fast":
-        return "turbo"
+    if normalized in ("fast", "priority"):
+        return "priority"
+    return normalized
+
+
+def public_model_name(model: str | None) -> str | None:
+    if not isinstance(model, str) or not model.strip():
+        return model
+    normalized = model.strip()
+    normalized = normalized.replace("-fast-", "-lightning-")
+    if normalized.endswith("-fast"):
+        normalized = normalized[: -len("-fast")] + "-lightning"
     return normalized

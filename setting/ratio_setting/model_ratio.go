@@ -349,39 +349,47 @@ func addTieredCompletionRatio(target map[string]float64, base string, ratio floa
 	target[base+"-xhigh"] = ratio
 }
 
+func addTieredCompletionRatios(target map[string]float64, base string, low, medium, high, xhigh float64) {
+	target[base] = medium
+	target[base+"-low"] = low
+	target[base+"-medium"] = medium
+	target[base+"-high"] = high
+	target[base+"-xhigh"] = xhigh
+}
+
 func seedDefaultGPTPricing() {
-	addTieredModelRatio(defaultModelRatio, "gpt-5.4", 9.375, 12.5, 15.625, 18.75)
-	addTieredModelRatio(defaultModelRatio, "gpt-5.4-fast", 28.125, 37.5, 46.875, 56.25)
+	addTieredModelRatio(defaultModelRatio, "gpt-5.4", 1.25, 1.25, 1.25, 1.25)
+	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4", 4.5, 6.0, 7.5, 9.0)
 
-	addTieredModelRatio(defaultModelRatio, "gpt-5.3-codex", 6.565, 8.75, 10.94, 13.125)
-	addTieredModelRatio(defaultModelRatio, "gpt-5.2-codex", 6.565, 8.75, 10.94, 13.125)
-	addTieredModelRatio(defaultModelRatio, "gpt-5.2", 6.565, 8.75, 10.94, 13.125)
-
-	addTieredModelRatio(defaultModelRatio, "gpt-5.1", 4.69, 6.25, 7.815, 9.375)
-	addTieredModelRatio(defaultModelRatio, "gpt-5", 4.69, 6.25, 7.815, 9.375)
-	addTieredModelRatio(defaultModelRatio, "gpt-5-codex", 4.69, 6.25, 7.815, 9.375)
-	addTieredModelRatio(defaultModelRatio, "gpt-5.1-codex", 4.69, 6.25, 7.815, 9.375)
-	addTieredModelRatio(defaultModelRatio, "gpt-5.1-codex-max", 4.69, 6.25, 7.815, 9.375)
-
-	addTieredModelRatio(defaultModelRatio, "gpt-5-mini", 0.94, 1.25, 1.565, 1.875)
-	addTieredModelRatio(defaultModelRatio, "gpt-5.1-codex-mini", 0.94, 1.25, 1.565, 1.875)
-
-	addTieredCompletionRatio(defaultCompletionRatio, "gpt-5.4", 9.0/7.0)
-	addTieredCompletionRatio(defaultCompletionRatio, "gpt-5.4-fast", 9.0/7.0)
+	addTieredModelRatio(defaultModelRatio, "gpt-5.4-fast", 2.5, 2.5, 2.5, 2.5)
+	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4-fast", 4.5, 6.0, 7.5, 9.0)
 
 	for _, base := range []string{
 		"gpt-5.3-codex",
 		"gpt-5.2-codex",
 		"gpt-5.2",
+	} {
+		addTieredModelRatio(defaultModelRatio, base, 0.875, 0.875, 0.875, 0.875)
+		addTieredCompletionRatios(defaultCompletionRatio, base, 6.0, 8.0, 10.0, 12.0)
+	}
+
+	for _, base := range []string{
 		"gpt-5.1",
 		"gpt-5",
 		"gpt-5-codex",
 		"gpt-5.1-codex",
 		"gpt-5.1-codex-max",
+	} {
+		addTieredModelRatio(defaultModelRatio, base, 0.625, 0.625, 0.625, 0.625)
+		addTieredCompletionRatios(defaultCompletionRatio, base, 6.0, 8.0, 10.0, 12.0)
+	}
+
+	for _, base := range []string{
 		"gpt-5-mini",
 		"gpt-5.1-codex-mini",
 	} {
-		addTieredCompletionRatio(defaultCompletionRatio, base, 12.0/7.0)
+		addTieredModelRatio(defaultModelRatio, base, 0.125, 0.125, 0.125, 0.125)
+		addTieredCompletionRatios(defaultCompletionRatio, base, 6.0, 8.0, 10.0, 12.0)
 	}
 }
 
@@ -493,6 +501,9 @@ func UpdateCompletionRatioByJSONString(jsonStr string) error {
 func GetCompletionRatio(name string) float64 {
 	name = FormatMatchingModelName(name)
 
+	if ratio, ok := completionRatioMap.Get(name); ok {
+		return ratio
+	}
 	if strings.Contains(name, "/") {
 		if ratio, ok := completionRatioMap.Get(name); ok {
 			return ratio
@@ -516,6 +527,12 @@ type CompletionRatioInfo struct {
 func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 	name = FormatMatchingModelName(name)
 
+	if ratio, ok := completionRatioMap.Get(name); ok {
+		return CompletionRatioInfo{
+			Ratio:  ratio,
+			Locked: false,
+		}
+	}
 	if strings.Contains(name, "/") {
 		if ratio, ok := completionRatioMap.Get(name); ok {
 			return CompletionRatioInfo{

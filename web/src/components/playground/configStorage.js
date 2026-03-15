@@ -24,7 +24,7 @@ import {
   PLAYGROUND_USER_PARAMETER_KEYS,
 } from '../../constants/playground.constants';
 
-const MESSAGES_STORAGE_KEY = 'playground_messages';
+const SESSION_STORAGE_KEY = 'playground_session_id';
 
 const pick = (source, keys) => {
   const out = {};
@@ -51,10 +51,6 @@ const normalizeUserScopedConfig = (config = {}) => {
   };
 };
 
-/**
- * 保存配置到 localStorage
- * @param {Object} config - 要保存的配置对象
- */
 export const saveConfig = (config) => {
   try {
     const normalized = normalizeUserScopedConfig(config);
@@ -68,10 +64,6 @@ export const saveConfig = (config) => {
   }
 };
 
-/**
- * 保存消息到 localStorage
- * @param {Array} messages - 要保存的消息数组
- */
 export const saveMessages = (messages) => {
   try {
     const messagesToSave = {
@@ -84,10 +76,49 @@ export const saveMessages = (messages) => {
   }
 };
 
-/**
- * 从 localStorage 加载配置
- * @returns {Object} 配置对象，如果不存在则返回默认配置
- */
+export const generateConversationSessionId = () => {
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      window.crypto &&
+      typeof window.crypto.randomUUID === 'function'
+    ) {
+      return window.crypto.randomUUID();
+    }
+  } catch (error) {
+    console.error('生成会话 ID 失败:', error);
+  }
+  return `pgsess_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+};
+
+export const saveConversationSessionId = (sessionId) => {
+  try {
+    if (sessionId && typeof sessionId === 'string') {
+      localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+    }
+  } catch (error) {
+    console.error('保存会话 ID 失败:', error);
+  }
+};
+
+export const loadConversationSessionId = () => {
+  try {
+    const sessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+    return sessionId || null;
+  } catch (error) {
+    console.error('加载会话 ID 失败:', error);
+  }
+  return null;
+};
+
+export const clearConversationSessionId = () => {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (error) {
+    console.error('清除会话 ID 失败:', error);
+  }
+};
+
 export const loadConfig = () => {
   try {
     const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
@@ -95,7 +126,7 @@ export const loadConfig = () => {
       const parsedConfig = JSON.parse(savedConfig);
       const normalized = normalizeUserScopedConfig(parsedConfig);
 
-      const mergedConfig = {
+      return {
         inputs: {
           ...DEFAULT_CONFIG.inputs,
           ...normalized.inputs,
@@ -105,8 +136,6 @@ export const loadConfig = () => {
           ...normalized.parameterEnabled,
         },
       };
-
-      return mergedConfig;
     }
   } catch (error) {
     console.error('加载配置失败:', error);
@@ -130,10 +159,6 @@ export const loadRawConfig = () => {
   return null;
 };
 
-/**
- * 从 localStorage 加载消息
- * @returns {Array} 消息数组，如果不存在则返回 null
- */
 export const loadMessages = () => {
   try {
     const savedMessages = localStorage.getItem(STORAGE_KEYS.MESSAGES);
@@ -148,33 +173,25 @@ export const loadMessages = () => {
   return null;
 };
 
-/**
- * 清除保存的配置
- */
 export const clearConfig = () => {
   try {
     localStorage.removeItem(STORAGE_KEYS.CONFIG);
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES); // 同时清除消息
+    localStorage.removeItem(STORAGE_KEYS.MESSAGES);
+    localStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (error) {
     console.error('清除配置失败:', error);
   }
 };
 
-/**
- * 清除保存的消息
- */
 export const clearMessages = () => {
   try {
     localStorage.removeItem(STORAGE_KEYS.MESSAGES);
+    localStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (error) {
     console.error('清除消息失败:', error);
   }
 };
 
-/**
- * 检查是否有保存的配置
- * @returns {boolean} 是否存在保存的配置
- */
 export const hasStoredConfig = () => {
   try {
     return localStorage.getItem(STORAGE_KEYS.CONFIG) !== null;
@@ -184,10 +201,6 @@ export const hasStoredConfig = () => {
   }
 };
 
-/**
- * 获取配置的最后保存时间
- * @returns {string|null} 最后保存时间的 ISO 字符串
- */
 export const getConfigTimestamp = () => {
   try {
     const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
@@ -201,16 +214,12 @@ export const getConfigTimestamp = () => {
   return null;
 };
 
-/**
- * 导出配置为 JSON 文件（包含消息）
- * @param {Object} config - 要导出的配置
- * @param {Array} messages - 要导出的消息
- */
 export const exportConfig = (config, messages = null) => {
   try {
     const configToExport = {
       ...config,
-      messages: messages || loadMessages(), // 包含消息数据
+      messages: messages || loadMessages(),
+      sessionId: loadConversationSessionId(),
       exportTime: new Date().toISOString(),
       version: '1.0',
     };
@@ -229,26 +238,26 @@ export const exportConfig = (config, messages = null) => {
   }
 };
 
-/**
- * 从文件导入配置（包含消息）
- * @param {File} file - 包含配置的 JSON 文件
- * @returns {Promise<Object>} 导入的配置对象
- */
 export const importConfig = (file) => {
   return new Promise((resolve, reject) => {
     try {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = (event) => {
         try {
-          const importedConfig = JSON.parse(e.target.result);
+          const importedConfig = JSON.parse(event.target.result);
 
           if (importedConfig.inputs && importedConfig.parameterEnabled) {
-            // 如果导入的配置包含消息，也一起导入
             if (
               importedConfig.messages &&
               Array.isArray(importedConfig.messages)
             ) {
               saveMessages(importedConfig.messages);
+            }
+            if (
+              importedConfig.sessionId &&
+              typeof importedConfig.sessionId === 'string'
+            ) {
+              saveConversationSessionId(importedConfig.sessionId);
             }
 
             resolve(importedConfig);
@@ -256,13 +265,13 @@ export const importConfig = (file) => {
             reject(new Error('配置文件格式无效'));
           }
         } catch (parseError) {
-          reject(new Error('解析配置文件失败: ' + parseError.message));
+          reject(new Error(`解析配置文件失败: ${parseError.message}`));
         }
       };
       reader.onerror = () => reject(new Error('读取文件失败'));
       reader.readAsText(file);
     } catch (error) {
-      reject(new Error('导入配置失败: ' + error.message));
+      reject(new Error(`导入配置失败: ${error.message}`));
     }
   });
 };

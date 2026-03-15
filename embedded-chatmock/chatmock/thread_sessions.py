@@ -36,6 +36,13 @@ def clear_thread_session(session_key: str | None) -> None:
         _SESSIONS.pop(session_key.strip(), None)
 
 
+def _first_non_empty(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def save_thread_session(
     session_key: str | None,
     *,
@@ -127,3 +134,43 @@ def build_thread_session_state(
         "candidate_url": preferred_url,
         "thread_mode": thread_mode,
     }
+
+
+def resolve_thread_session_state(
+    *,
+    payload: Dict[str, Any],
+    input_items: List[Dict[str, Any]],
+    headers: Any | None = None,
+) -> Dict[str, Any] | None:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    header_get = headers.get if headers is not None and hasattr(headers, "get") else lambda _k: None
+
+    session_key = _first_non_empty(
+        payload.get("session_id"),
+        metadata.get("session_id"),
+        payload.get("conversation_id"),
+        metadata.get("conversation_id"),
+        header_get("x-session-id"),
+        header_get("session_id"),
+        header_get("x-conversation-id"),
+        header_get("conversation_id"),
+    )
+    explicit_thread_id = _first_non_empty(
+        payload.get("thread_id"),
+        metadata.get("thread_id"),
+        header_get("x-thread-id"),
+        header_get("thread_id"),
+    )
+    fork_from_thread_id = _first_non_empty(
+        payload.get("fork_from_thread_id"),
+        metadata.get("fork_from_thread_id"),
+        header_get("x-fork-from-thread-id"),
+        header_get("fork_from_thread_id"),
+    )
+
+    return build_thread_session_state(
+        session_key=session_key,
+        input_items=input_items,
+        explicit_thread_id=explicit_thread_id,
+        fork_from_thread_id=fork_from_thread_id,
+    )

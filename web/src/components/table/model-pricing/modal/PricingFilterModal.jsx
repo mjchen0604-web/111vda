@@ -55,8 +55,7 @@ const PricingFilterModal = ({ visible, onClose, sidebarProps, t }) => {
         padding: 0,
         height: 'calc(100vh - 160px)',
         overflowY: 'auto',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
+        scrollbarWidth: 'thin',
       }}
     >
       <FilterModalContent sidebarProps={sidebarProps} t={t} />

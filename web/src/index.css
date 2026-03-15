@@ -971,3 +971,139 @@ html.dark .with-pastel-balls::before {
 .semi-datepicker-range-input {
   border-radius: 10px !important;
 }
+
+/* ==================== Visible Scrollbars ==================== */
+.semi-layout,
+.semi-layout-content,
+.semi-sider,
+.sidebar-nav,
+.semi-chat,
+.semi-chat-chatBox,
+.semi-chat-chatBox-wrap,
+.semi-chat-chatBox-content,
+.semi-chat-content,
+.semi-chat-list,
+.semi-chat-container,
+.pricing-scroll-hide,
+.model-test-scroll,
+.card-content-scroll,
+.model-settings-scroll,
+.thinking-content-scroll,
+.custom-request-textarea .semi-input,
+.custom-request-textarea textarea,
+.notice-content-scroll,
+.semi-transfer-left-list,
+.semi-transfer-right-list,
+.semi-scrolllist,
+.scrollbar-hide {
+  -ms-overflow-style: auto !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(var(--semi-grey-3), 0.45) transparent !important;
+}
+
+.semi-layout::-webkit-scrollbar,
+.semi-layout-content::-webkit-scrollbar,
+.semi-sider::-webkit-scrollbar,
+.sidebar-nav::-webkit-scrollbar,
+.semi-chat::-webkit-scrollbar,
+.semi-chat-chatBox::-webkit-scrollbar,
+.semi-chat-chatBox-wrap::-webkit-scrollbar,
+.semi-chat-chatBox-content::-webkit-scrollbar,
+.semi-chat-content::-webkit-scrollbar,
+.semi-chat-list::-webkit-scrollbar,
+.semi-chat-container::-webkit-scrollbar,
+.pricing-scroll-hide::-webkit-scrollbar,
+.model-test-scroll::-webkit-scrollbar,
+.card-content-scroll::-webkit-scrollbar,
+.model-settings-scroll::-webkit-scrollbar,
+.thinking-content-scroll::-webkit-scrollbar,
+.custom-request-textarea .semi-input::-webkit-scrollbar,
+.custom-request-textarea textarea::-webkit-scrollbar,
+.notice-content-scroll::-webkit-scrollbar,
+.semi-transfer-left-list::-webkit-scrollbar,
+.semi-transfer-right-list::-webkit-scrollbar,
+.semi-scrolllist::-webkit-scrollbar,
+.scrollbar-hide::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+  display: block !important;
+}
+
+.semi-layout::-webkit-scrollbar-thumb,
+.semi-layout-content::-webkit-scrollbar-thumb,
+.semi-sider::-webkit-scrollbar-thumb,
+.sidebar-nav::-webkit-scrollbar-thumb,
+.semi-chat::-webkit-scrollbar-thumb,
+.semi-chat-chatBox::-webkit-scrollbar-thumb,
+.semi-chat-chatBox-wrap::-webkit-scrollbar-thumb,
+.semi-chat-chatBox-content::-webkit-scrollbar-thumb,
+.semi-chat-content::-webkit-scrollbar-thumb,
+.semi-chat-list::-webkit-scrollbar-thumb,
+.semi-chat-container::-webkit-scrollbar-thumb,
+.pricing-scroll-hide::-webkit-scrollbar-thumb,
+.model-test-scroll::-webkit-scrollbar-thumb,
+.card-content-scroll::-webkit-scrollbar-thumb,
+.model-settings-scroll::-webkit-scrollbar-thumb,
+.thinking-content-scroll::-webkit-scrollbar-thumb,
+.custom-request-textarea .semi-input::-webkit-scrollbar-thumb,
+.custom-request-textarea textarea::-webkit-scrollbar-thumb,
+.notice-content-scroll::-webkit-scrollbar-thumb,
+.semi-transfer-left-list::-webkit-scrollbar-thumb,
+.semi-transfer-right-list::-webkit-scrollbar-thumb,
+.semi-scrolllist::-webkit-scrollbar-thumb,
+.scrollbar-hide::-webkit-scrollbar-thumb {
+  background: rgba(var(--semi-grey-3), 0.45);
+  border-radius: 999px;
+}
+
+.semi-layout::-webkit-scrollbar-thumb:hover,
+.semi-layout-content::-webkit-scrollbar-thumb:hover,
+.semi-sider::-webkit-scrollbar-thumb:hover,
+.sidebar-nav::-webkit-scrollbar-thumb:hover,
+.semi-chat::-webkit-scrollbar-thumb:hover,
+.semi-chat-chatBox::-webkit-scrollbar-thumb:hover,
+.semi-chat-chatBox-wrap::-webkit-scrollbar-thumb:hover,
+.semi-chat-chatBox-content::-webkit-scrollbar-thumb:hover,
+.semi-chat-content::-webkit-scrollbar-thumb:hover,
+.semi-chat-list::-webkit-scrollbar-thumb:hover,
+.semi-chat-container::-webkit-scrollbar-thumb:hover,
+.pricing-scroll-hide::-webkit-scrollbar-thumb:hover,
+.model-test-scroll::-webkit-scrollbar-thumb:hover,
+.card-content-scroll::-webkit-scrollbar-thumb:hover,
+.model-settings-scroll::-webkit-scrollbar-thumb:hover,
+.thinking-content-scroll::-webkit-scrollbar-thumb:hover,
+.custom-request-textarea .semi-input::-webkit-scrollbar-thumb:hover,
+.custom-request-textarea textarea::-webkit-scrollbar-thumb:hover,
+.notice-content-scroll::-webkit-scrollbar-thumb:hover,
+.semi-transfer-left-list::-webkit-scrollbar-thumb:hover,
+.semi-transfer-right-list::-webkit-scrollbar-thumb:hover,
+.semi-scrolllist::-webkit-scrollbar-thumb:hover,
+.scrollbar-hide::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--semi-grey-4), 0.7);
+}
+
+.semi-layout::-webkit-scrollbar-track,
+.semi-layout-content::-webkit-scrollbar-track,
+.semi-sider::-webkit-scrollbar-track,
+.sidebar-nav::-webkit-scrollbar-track,
+.semi-chat::-webkit-scrollbar-track,
+.semi-chat-chatBox::-webkit-scrollbar-track,
+.semi-chat-chatBox-wrap::-webkit-scrollbar-track,
+.semi-chat-chatBox-content::-webkit-scrollbar-track,
+.semi-chat-content::-webkit-scrollbar-track,
+.semi-chat-list::-webkit-scrollbar-track,
+.semi-chat-container::-webkit-scrollbar-track,
+.pricing-scroll-hide::-webkit-scrollbar-track,
+.model-test-scroll::-webkit-scrollbar-track,
+.card-content-scroll::-webkit-scrollbar-track,
+.model-settings-scroll::-webkit-scrollbar-track,
+.thinking-content-scroll::-webkit-scrollbar-track,
+.custom-request-textarea .semi-input::-webkit-scrollbar-track,
+.custom-request-textarea textarea::-webkit-scrollbar-track,
+.notice-content-scroll::-webkit-scrollbar-track,
+.semi-transfer-left-list::-webkit-scrollbar-track,
+.semi-transfer-right-list::-webkit-scrollbar-track,
+.semi-scrolllist::-webkit-scrollbar-track,
+.scrollbar-hide::-webkit-scrollbar-track {
+  background: transparent;
+}

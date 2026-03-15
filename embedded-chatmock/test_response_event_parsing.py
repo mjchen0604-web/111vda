@@ -1,0 +1,93 @@
+import json
+import sys
+import unittest
+from pathlib import Path
+
+
+CHATMOCK_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(CHATMOCK_ROOT))
+
+from chatmock.routes_openai import _consume_chat_completion_nonstream
+from chatmock.utils import sse_translate_chat
+
+
+class DummyUpstream:
+    def __init__(self, events):
+        self._events = events
+        self.chatmock_source = "upstream"
+        self.status_code = 200
+        self.closed = False
+
+    def iter_lines(self, decode_unicode=False):
+        for event in self._events:
+            line = f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            yield line if decode_unicode else line.encode("utf-8")
+
+    def close(self):
+        self.closed = True
+
+
+def _message_done_events(text: str):
+    response = {
+        "id": "resp_test",
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            }
+        ],
+    }
+    return [
+        {
+            "type": "response.output_item.done",
+            "item": response["output"][0],
+            "response": {"id": "resp_test"},
+        },
+        {
+            "type": "response.completed",
+            "response": response,
+        },
+    ]
+
+
+class ResponseEventParsingTests(unittest.TestCase):
+    def test_nonstream_recovers_message_text_from_output_item_done(self):
+        upstream = DummyUpstream(_message_done_events("Image summary"))
+        result = _consume_chat_completion_nonstream(
+            upstream,
+            requested_model="gpt-5.4",
+            model="gpt-5.4",
+            created=0,
+            reasoning_compat="think-tags",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["message"]["content"], "Image summary")
+
+    def test_stream_recovers_message_text_without_output_text_delta(self):
+        upstream = DummyUpstream(_message_done_events("Image summary"))
+        chunks = list(
+            sse_translate_chat(
+                upstream,
+                "gpt-5.4",
+                0,
+                reasoning_compat="think-tags",
+            )
+        )
+        payloads = []
+        for chunk in chunks:
+            text = chunk.decode("utf-8")
+            if not text.startswith("data: ") or "[DONE]" in text:
+                continue
+            payloads.append(json.loads(text[len("data: ") :].strip()))
+
+        content_deltas = [
+            entry["choices"][0]["delta"].get("content", "")
+            for entry in payloads
+            if entry.get("choices")
+        ]
+        self.assertIn("Image summary", "".join(content_deltas))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -22,6 +22,7 @@ import { Toast, Modal } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import {
   getTextContent,
+  applyConversationSessionToPayload,
   buildApiPayload,
   createLoadingAssistantMessage,
 } from '../../helpers';
@@ -31,6 +32,7 @@ export const useMessageEdit = (
   setMessage,
   inputs,
   parameterEnabled,
+  conversationSessionId,
   sendRequest,
   saveMessages,
 ) => {
@@ -107,11 +109,15 @@ export const useMessageEdit = (
                 if (inputs.promptMode === 'native' && inputs.systemPrompt?.trim()) {
                   payload.system_prompt = inputs.systemPrompt.trim();
                 }
+                const requestPayload = applyConversationSessionToPayload(
+                  payload,
+                  conversationSessionId,
+                );
                 setMessage((prevMsg) => [
                   ...prevMsg,
                   createLoadingAssistantMessage(),
                 ]);
-                sendRequest(payload, inputs.stream);
+                sendRequest(requestPayload, inputs.stream);
               }, 100);
             },
             onCancel: () => {
@@ -139,6 +145,7 @@ export const useMessageEdit = (
     t,
     inputs,
     parameterEnabled,
+    conversationSessionId,
     sendRequest,
     setMessage,
     saveMessages,

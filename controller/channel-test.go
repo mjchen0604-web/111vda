@@ -42,6 +42,43 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+func buildResponsesTestInput(testPrompt string) json.RawMessage {
+	content := []map[string]any{
+		{
+			"type": "input_text",
+			"text": testPrompt,
+		},
+	}
+	payload := []map[string]any{
+		{
+			"type":    "message",
+			"role":    "user",
+			"content": content,
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return json.RawMessage(`[]`)
+	}
+	return raw
+}
+
+func buildResponsesTestRequest(model string, testPrompt string, isStream bool) *dto.OpenAIResponsesRequest {
+	maxOutputTokens := uint(64)
+	req := &dto.OpenAIResponsesRequest{
+		Model:           model,
+		Input:           buildResponsesTestInput(testPrompt),
+		Instructions:    json.RawMessage(`"You are a helpful assistant."`),
+		MaxOutputTokens: lo.ToPtr(maxOutputTokens),
+		Store:           json.RawMessage("false"),
+		Stream:          lo.ToPtr(isStream),
+	}
+	if isStream {
+		req.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
+	}
+	return req
+}
+
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
@@ -643,7 +680,7 @@ func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
 
 func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {
 	testPrompt := "What is 100 divided by 2 multiplied by 10 divided by 5? Reply with only the final number."
-	testResponsesInput := json.RawMessage(fmt.Sprintf(`[{"role":"user","content":%q}]`, testPrompt))
+	testResponsesInput := buildResponsesTestInput(testPrompt)
 
 	// 根据端点类型构建不同的测试请求
 	if endpointType != "" {
@@ -672,11 +709,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			}
 		case constant.EndpointTypeOpenAIResponse:
 			// 返回 OpenAIResponsesRequest
-			return &dto.OpenAIResponsesRequest{
-				Model:  model,
-				Input:  json.RawMessage(fmt.Sprintf(`[{"role":"user","content":%q}]`, testPrompt)),
-				Stream: lo.ToPtr(isStream),
-			}
+			return buildResponsesTestRequest(model, testPrompt, isStream)
 		case constant.EndpointTypeOpenAIResponseCompact:
 			// 返回 OpenAIResponsesCompactionRequest
 			return &dto.OpenAIResponsesCompactionRequest{
@@ -739,11 +772,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 	// Responses-only models (e.g. codex series)
 	if strings.Contains(strings.ToLower(model), "codex") &&
 		(channel == nil || channel.Type != constant.ChannelTypeChatCore) {
-		return &dto.OpenAIResponsesRequest{
-			Model:  model,
-			Input:  json.RawMessage(fmt.Sprintf(`[{"role":"user","content":%q}]`, testPrompt)),
-			Stream: lo.ToPtr(isStream),
-		}
+		return buildResponsesTestRequest(model, testPrompt, isStream)
 	}
 
 	// Chat/Completion 请求 - 返回 GeneralOpenAIRequest

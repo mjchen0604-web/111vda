@@ -15,8 +15,11 @@ from .reasoning import (
     build_reasoning_param,
     extract_reasoning_from_model_name,
     extract_service_tier_from_model_name,
+    public_model_name,
+    public_service_tier_name,
 )
 from .transform import convert_ollama_messages, normalize_ollama_tools
+from .thread_sessions import resolve_thread_session_state
 from .upstream_errors import (
     build_error_info,
     build_ollama_error_response,
@@ -147,7 +150,7 @@ def ollama_tags() -> Response:
         "gpt-5.1",
         "gpt-5.2",
         "gpt-5.4",
-        "gpt-5.4-fast",
+        "gpt-5.4-lightning",
         "gpt-5.3-codex",
         "gpt-5-codex",
         "gpt-5.2-codex",
@@ -173,10 +176,10 @@ def ollama_tags() -> Response:
                 "gpt-5.4-high",
                 "gpt-5.4-medium",
                 "gpt-5.4-low",
-                "gpt-5.4-fast-xhigh",
-                "gpt-5.4-fast-high",
-                "gpt-5.4-fast-medium",
-                "gpt-5.4-fast-low",
+                "gpt-5.4-lightning-xhigh",
+                "gpt-5.4-lightning-high",
+                "gpt-5.4-lightning-medium",
+                "gpt-5.4-lightning-low",
                 "gpt-5-codex-high",
                 "gpt-5-codex-medium",
                 "gpt-5-codex-low",
@@ -201,8 +204,8 @@ def ollama_tags() -> Response:
     for model_id in model_ids:
         models.append(
             {
-                "name": model_id,
-                "model": model_id,
+                "name": public_model_name(model_id),
+                "model": public_model_name(model_id),
                 "modified_at": "2023-10-01T00:00:00Z",
                 "size": 815319791,
                 "digest": "8648f39daa8fbf5b18c7b4e6a8fb4990c692751d49917417b8842ca5758e7ffc",
@@ -353,6 +356,11 @@ def ollama_chat() -> Response:
         return jsonify(err), 400
 
     input_items = convert_chat_messages_to_responses_input(messages)
+    thread_session = resolve_thread_session_state(
+        payload=payload,
+        input_items=input_items,
+        headers=request.headers,
+    )
 
     model_reasoning = extract_reasoning_from_model_name(model)
     normalized_model = normalize_model_name(model)
@@ -375,6 +383,7 @@ def ollama_chat() -> Response:
                 allowed_efforts=allowed_efforts_for_model(model),
             ),
             service_tier=service_tier,
+            thread_session=thread_session,
         )
         if error_resp is not None:
             error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
@@ -407,6 +416,7 @@ def ollama_chat() -> Response:
                         allowed_efforts=allowed_efforts_for_model(model),
                     ),
                     service_tier=service_tier,
+                    thread_session=thread_session,
                 )
                 record_rate_limits_from_response(upstream2)
                 if err2 is None and upstream2 is not None and upstream2.status_code < 400:
@@ -677,6 +687,7 @@ def ollama_chat() -> Response:
                             allowed_efforts=allowed_efforts_for_model(model),
                         ),
                         service_tier=service_tier,
+                        thread_session=thread_session,
                     )
                     if next_error is not None:
                         next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
@@ -798,7 +809,7 @@ def ollama_chat() -> Response:
         "done_reason": "tool_calls" if tool_calls else "stop",
     }
     if observed_service_tier:
-        out_json["service_tier"] = observed_service_tier
+        out_json["service_tier"] = public_service_tier_name(observed_service_tier)
     out_json.update(_OLLAMA_FAKE_EVAL)
     if verbose:
         _log_json("OUT POST /api/chat", out_json)

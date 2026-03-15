@@ -618,6 +618,99 @@ export const calculateModelPrice = ({
   quotaDisplayType = 'USD',
   precision = 4,
 }) => {
+  const gptPricingPreset = (() => {
+    const presets = {
+      'gpt-5.4': {
+        low: { input: 2.5, cache: 0.25, output: 11.25 },
+        medium: { input: 2.5, cache: 0.25, output: 15.0 },
+        high: { input: 2.5, cache: 0.25, output: 18.75 },
+        xhigh: { input: 2.5, cache: 0.25, output: 22.5 },
+      },
+      'gpt-5.4-fast': {
+        low: { input: 5.0, cache: 0.5, output: 22.5 },
+        medium: { input: 5.0, cache: 0.5, output: 30.0 },
+        high: { input: 5.0, cache: 0.5, output: 37.5 },
+        xhigh: { input: 5.0, cache: 0.5, output: 45.0 },
+      },
+      'gpt-5.3-codex': {
+        low: { input: 1.75, cache: 0.175, output: 10.5 },
+        medium: { input: 1.75, cache: 0.175, output: 14.0 },
+        high: { input: 1.75, cache: 0.175, output: 17.5 },
+        xhigh: { input: 1.75, cache: 0.175, output: 21.0 },
+      },
+      'gpt-5.2-codex': {
+        low: { input: 1.75, cache: 0.175, output: 10.5 },
+        medium: { input: 1.75, cache: 0.175, output: 14.0 },
+        high: { input: 1.75, cache: 0.175, output: 17.5 },
+        xhigh: { input: 1.75, cache: 0.175, output: 21.0 },
+      },
+      'gpt-5.2': {
+        low: { input: 1.75, cache: 0.175, output: 10.5 },
+        medium: { input: 1.75, cache: 0.175, output: 14.0 },
+        high: { input: 1.75, cache: 0.175, output: 17.5 },
+        xhigh: { input: 1.75, cache: 0.175, output: 21.0 },
+      },
+      'gpt-5.1': {
+        low: { input: 1.25, cache: 0.125, output: 7.5 },
+        medium: { input: 1.25, cache: 0.125, output: 10.0 },
+        high: { input: 1.25, cache: 0.125, output: 12.5 },
+        xhigh: { input: 1.25, cache: 0.125, output: 15.0 },
+      },
+      'gpt-5': {
+        low: { input: 1.25, cache: 0.125, output: 7.5 },
+        medium: { input: 1.25, cache: 0.125, output: 10.0 },
+        high: { input: 1.25, cache: 0.125, output: 12.5 },
+        xhigh: { input: 1.25, cache: 0.125, output: 15.0 },
+      },
+      'gpt-5-codex': {
+        low: { input: 1.25, cache: 0.125, output: 7.5 },
+        medium: { input: 1.25, cache: 0.125, output: 10.0 },
+        high: { input: 1.25, cache: 0.125, output: 12.5 },
+        xhigh: { input: 1.25, cache: 0.125, output: 15.0 },
+      },
+      'gpt-5.1-codex': {
+        low: { input: 1.25, cache: 0.125, output: 7.5 },
+        medium: { input: 1.25, cache: 0.125, output: 10.0 },
+        high: { input: 1.25, cache: 0.125, output: 12.5 },
+        xhigh: { input: 1.25, cache: 0.125, output: 15.0 },
+      },
+      'gpt-5.1-codex-max': {
+        low: { input: 1.25, cache: 0.125, output: 7.5 },
+        medium: { input: 1.25, cache: 0.125, output: 10.0 },
+        high: { input: 1.25, cache: 0.125, output: 12.5 },
+        xhigh: { input: 1.25, cache: 0.125, output: 15.0 },
+      },
+      'gpt-5-mini': {
+        low: { input: 0.25, cache: 0.025, output: 1.5 },
+        medium: { input: 0.25, cache: 0.025, output: 2.0 },
+        high: { input: 0.25, cache: 0.025, output: 2.5 },
+        xhigh: { input: 0.25, cache: 0.025, output: 3.0 },
+      },
+      'gpt-5.1-codex-mini': {
+        low: { input: 0.25, cache: 0.025, output: 1.5 },
+        medium: { input: 0.25, cache: 0.025, output: 2.0 },
+        high: { input: 0.25, cache: 0.025, output: 2.5 },
+        xhigh: { input: 0.25, cache: 0.025, output: 3.0 },
+      },
+    };
+
+    const normalized = String(record?.model_name || '').toLowerCase();
+    if (!normalized.startsWith('gpt-5')) {
+      return null;
+    }
+    const suffixes = ['-low', '-medium', '-high', '-xhigh'];
+    let baseModel = normalized;
+    let effort = 'medium';
+    for (const suffix of suffixes) {
+      if (normalized.endsWith(suffix)) {
+        baseModel = normalized.slice(0, -suffix.length);
+        effort = suffix.slice(1);
+        break;
+      }
+    }
+    const preset = presets[baseModel];
+    return preset ? preset[effort] || preset.medium || null : null;
+  })();
   // 1. 选择实际使用的分组
   let usedGroup = selectedGroup;
   let usedGroupRatio = groupRatio[selectedGroup];

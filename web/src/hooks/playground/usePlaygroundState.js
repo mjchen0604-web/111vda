@@ -30,6 +30,9 @@ import {
   loadMessages,
   saveConfig,
   saveMessages,
+  generateConversationSessionId,
+  loadConversationSessionId,
+  saveConversationSessionId,
 } from '../../components/playground/configStorage';
 import { processIncompleteThinkTags } from '../../helpers';
 
@@ -66,6 +69,15 @@ export const usePlaygroundState = () => {
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
   const [message, setMessage] = useState(() => initialMessages || getDefaultMessages(t));
+  const [conversationSessionId, setConversationSessionId] = useState(() => {
+    const savedSessionId = loadConversationSessionId();
+    if (savedSessionId) {
+      return savedSessionId;
+    }
+    const nextSessionId = generateConversationSessionId();
+    saveConversationSessionId(nextSessionId);
+    return nextSessionId;
+  });
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editValue, setEditValue] = useState('');
 
@@ -97,6 +109,13 @@ export const usePlaygroundState = () => {
     [message],
   );
 
+  const resetConversationSession = useCallback(() => {
+    const nextSessionId = generateConversationSessionId();
+    setConversationSessionId(nextSessionId);
+    saveConversationSessionId(nextSessionId);
+    return nextSessionId;
+  }, []);
+
   const debouncedSaveConfig = useCallback(() => {
     if (saveConfigTimeoutRef.current) {
       clearTimeout(saveConfigTimeoutRef.current);
@@ -123,6 +142,13 @@ export const usePlaygroundState = () => {
     if (importedConfig.messages && Array.isArray(importedConfig.messages)) {
       setMessage(importedConfig.messages);
     }
+    if (
+      importedConfig.sessionId &&
+      typeof importedConfig.sessionId === 'string'
+    ) {
+      setConversationSessionId(importedConfig.sessionId);
+      saveConversationSessionId(importedConfig.sessionId);
+    }
   }, []);
 
   const handleConfigReset = useCallback(
@@ -132,13 +158,14 @@ export const usePlaygroundState = () => {
       setParameterEnabled(DEFAULT_CONFIG.parameterEnabled);
 
       if (resetMessages) {
+        resetConversationSession();
         setMessage([]);
         setTimeout(() => {
           setMessage(getDefaultMessages(t));
         }, 0);
       }
     },
-    [t],
+    [resetConversationSession, t],
   );
 
   useEffect(() => {
@@ -219,6 +246,7 @@ export const usePlaygroundState = () => {
     models,
     groups,
     message,
+    conversationSessionId,
     editingMessageId,
     editValue,
     sseSourceRef,
@@ -236,6 +264,7 @@ export const usePlaygroundState = () => {
     handleParameterToggle,
     debouncedSaveConfig,
     saveMessagesImmediately,
+    resetConversationSession,
     handleConfigImport,
     handleConfigReset,
     applyRemoteDefaults,

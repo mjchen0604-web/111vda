@@ -2,7 +2,7 @@ package common
 
 import "github.com/QuantumNous/new-api/constant"
 
-// GetEndpointTypesByChannelType 获取渠道最优先端点类型（所有的渠道都支持 OpenAI 端点）
+// GetEndpointTypesByChannelType returns the preferred endpoint types for a channel.
 func GetEndpointTypesByChannelType(channelType int, modelName string) []constant.EndpointType {
 	var endpointTypes []constant.EndpointType
 	switch channelType {
@@ -24,7 +24,15 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		fallthrough
 	case constant.ChannelTypeGemini:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeGemini, constant.EndpointTypeOpenAI}
-	case constant.ChannelTypeOpenRouter: // OpenRouter 只支持 OpenAI 端点
+	case constant.ChannelTypeOpenAI:
+		if IsOpenAIResponseOnlyModel(modelName) {
+			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
+		} else {
+			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse}
+		}
+	case constant.ChannelTypeCodex:
+		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
+	case constant.ChannelTypeOpenRouter:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
 	case constant.ChannelTypeXai:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse}
@@ -38,7 +46,7 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		}
 	}
 	if IsImageGenerationModel(modelName) {
-		// add to first
+		// Prefer image generation endpoints for image-only models.
 		endpointTypes = append([]constant.EndpointType{constant.EndpointTypeImageGeneration}, endpointTypes...)
 	}
 	return endpointTypes

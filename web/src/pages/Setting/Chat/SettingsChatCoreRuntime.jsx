@@ -333,7 +333,7 @@ export default function SettingsChatCoreRuntime() {
                         value='auto'
                         optionList={selectOptions([
                           {
-                            label: 'auto (标准请求走主路由，turbo/flex 走高性能路由)',
+                            label: 'auto (标准请求走主路由，priority/flex 走高性能路由)',
                             value: 'auto',
                           },
                         ])}
@@ -357,7 +357,7 @@ export default function SettingsChatCoreRuntime() {
                         value={settings.serviceTier ?? ''}
                         optionList={selectOptions([
                           { label: '默认 / 不透传', value: '' },
-                          { label: 'turbo', value: 'fast' },
+                          { label: 'priority', value: 'priority' },
                           { label: 'flex', value: 'flex' },
                         ])}
                         onChange={(value) => handleSettingChange('serviceTier', value)}

@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Typography, Toast, Avatar } from '@douyinfe/semi-ui';
-import { getLobeHubIcon } from '../../../../../helpers';
+import { getLobeHubIcon, toPublicModelName } from '../../../../../helpers';
 
 const { Paragraph } = Typography;
 
@@ -29,10 +29,10 @@ const CARD_STYLES = {
   icon: 'w-8 h-8 flex items-center justify-center',
 };
 
-const ModelHeader = ({ modelData, vendorsMap = {}, t }) => {
-  // 获取模型图标（优先模型图标，其次供应商图标）
+const ModelHeader = ({ modelData, t }) => {
+  const displayModelName = toPublicModelName(modelData?.model_name || '') || '';
+
   const getModelIcon = () => {
-    // 1) 优先使用模型自定义图标
     if (modelData?.icon) {
       return (
         <div className={CARD_STYLES.container}>
@@ -42,7 +42,7 @@ const ModelHeader = ({ modelData, vendorsMap = {}, t }) => {
         </div>
       );
     }
-    // 2) 退化为供应商图标
+
     if (modelData?.vendor_icon) {
       return (
         <div className={CARD_STYLES.container}>
@@ -53,8 +53,7 @@ const ModelHeader = ({ modelData, vendorsMap = {}, t }) => {
       );
     }
 
-    // 如果没有供应商图标，使用模型名称的前两个字符
-    const avatarText = modelData?.model_name?.slice(0, 2).toUpperCase() || 'AI';
+    const avatarText = displayModelName.slice(0, 2).toUpperCase() || 'AI';
     return (
       <div className={CARD_STYLES.container}>
         <Avatar
@@ -80,12 +79,12 @@ const ModelHeader = ({ modelData, vendorsMap = {}, t }) => {
         <Paragraph
           className='!mb-0 !text-lg !font-medium'
           copyable={{
-            content: modelData?.model_name || '',
+            content: displayModelName,
             onCopy: () => Toast.success({ content: t('已复制模型名称') }),
           }}
         >
           <span className='truncate max-w-60 font-bold'>
-            {modelData?.model_name || t('未知模型')}
+            {displayModelName || t('未知模型')}
           </span>
         </Paragraph>
       </div>

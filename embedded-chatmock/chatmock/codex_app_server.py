@@ -37,6 +37,8 @@ def normalize_service_tier_for_codex(service_tier: str | None) -> str | None:
     normalized = service_tier.strip().lower()
     if not normalized or normalized in ("off", "none", "unset", "default"):
         return None
+    if normalized == "priority":
+        return "fast"
     if normalized in ("fast", "flex"):
         return normalized
     return normalized

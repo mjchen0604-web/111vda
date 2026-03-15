@@ -143,6 +143,39 @@ export const buildApiPayload = (
   return payload;
 };
 
+export const applyConversationSessionToPayload = (payload, conversationSessionId) => {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !conversationSessionId ||
+    typeof conversationSessionId !== 'string'
+  ) {
+    return payload;
+  }
+
+  const nextPayload = { ...payload };
+  if (!nextPayload.prompt_cache_key) {
+    nextPayload.prompt_cache_key = conversationSessionId;
+  }
+
+  const metadata =
+    nextPayload.metadata &&
+    typeof nextPayload.metadata === 'object' &&
+    !Array.isArray(nextPayload.metadata)
+      ? { ...nextPayload.metadata }
+      : {};
+
+  if (!metadata.conversation_id) {
+    metadata.conversation_id = conversationSessionId;
+  }
+  if (!metadata.session_id) {
+    metadata.session_id = conversationSessionId;
+  }
+  nextPayload.metadata = metadata;
+
+  return nextPayload;
+};
+
 // 处理API错误响应
 export const handleApiError = (error, response = null) => {
   const errorInfo = {
