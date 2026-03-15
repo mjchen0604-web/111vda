@@ -204,10 +204,13 @@ def _resolve_web_search_mode(
         return "disabled"
 
     requested_modes: List[str] = []
+    has_explicit_tools = False
     for tool in list(tools_payload or []) + list(responses_tools_payload or []):
         if not isinstance(tool, dict):
             continue
         tool_type = tool.get("type")
+        if isinstance(tool_type, str) and tool_type:
+            has_explicit_tools = True
         if tool_type == "web_search":
             requested_modes.append("live")
         elif tool_type == "web_search_preview":
@@ -217,7 +220,7 @@ def _resolve_web_search_mode(
         return "live"
     if "cached" in requested_modes:
         return "cached"
-    if bool(current_app.config.get("DEFAULT_WEB_SEARCH")):
+    if bool(current_app.config.get("DEFAULT_WEB_SEARCH")) and not has_explicit_tools:
         return "live"
     return "disabled"
 
@@ -572,7 +575,12 @@ def chat_completions() -> Response:
                 return jsonify(err), 400
             builtin_search_tools.append({"type": _t.get("type")})
 
-        if not builtin_search_tools and bool(current_app.config.get("DEFAULT_WEB_SEARCH")):
+        if (
+            not builtin_search_tools
+            and not raw_tools_payload
+            and not responses_tools_payload
+            and bool(current_app.config.get("DEFAULT_WEB_SEARCH"))
+        ):
             responses_tool_choice = payload.get("responses_tool_choice")
             if not (isinstance(responses_tool_choice, str) and responses_tool_choice == "none"):
                 builtin_search_tools = [{"type": "web_search"}]
