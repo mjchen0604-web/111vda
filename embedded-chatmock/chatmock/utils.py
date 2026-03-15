@@ -1733,7 +1733,10 @@ def sse_translate_chat(
                             ],
                         }
                         yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
-            elif isinstance(kind, str) and kind.endswith(".done"):
+            elif isinstance(kind, str) and kind.endswith(".done") and kind not in (
+                "response.output_text.done",
+                "response.content_part.done",
+            ):
                 pass
             elif kind == "response.output_text.done":
                 emitted_output_text, missing_delta = merge_response_text(

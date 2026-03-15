@@ -51,6 +51,31 @@ def _message_done_events(text: str):
     ]
 
 
+def _output_text_done_only_events(text: str):
+    return [
+        {
+            "type": "response.output_text.done",
+            "item_id": "msg_done",
+            "content_index": 0,
+            "text": text,
+            "response": {"id": "resp_test"},
+        },
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_test",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}],
+                    }
+                ],
+            },
+        },
+    ]
+
+
 class ResponseEventParsingTests(unittest.TestCase):
     def test_nonstream_recovers_message_text_from_output_item_done(self):
         upstream = DummyUpstream(_message_done_events("Image summary"))
@@ -87,6 +112,30 @@ class ResponseEventParsingTests(unittest.TestCase):
             if entry.get("choices")
         ]
         self.assertIn("Image summary", "".join(content_deltas))
+
+    def test_stream_recovers_text_from_output_text_done(self):
+        upstream = DummyUpstream(_output_text_done_only_events("Only done text"))
+        chunks = list(
+            sse_translate_chat(
+                upstream,
+                "gpt-5.4",
+                0,
+                reasoning_compat="think-tags",
+            )
+        )
+        payloads = []
+        for chunk in chunks:
+            text = chunk.decode("utf-8")
+            if not text.startswith("data: ") or "[DONE]" in text:
+                continue
+            payloads.append(json.loads(text[len("data: ") :].strip()))
+
+        content_deltas = [
+            entry["choices"][0]["delta"].get("content", "")
+            for entry in payloads
+            if entry.get("choices")
+        ]
+        self.assertIn("Only done text", "".join(content_deltas))
 
 
 if __name__ == "__main__":

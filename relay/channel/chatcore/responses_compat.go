@@ -407,6 +407,8 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 	model := ""
 	createdAt := int(time.Now().Unix())
 	sentCreated := false
+	sentMessageItemAdded := false
+	sentMessagePartAdded := false
 	var usage dto.Usage
 	var outputText strings.Builder
 	toolCalls := make(map[int]*chatcoreToolCallState)
@@ -437,6 +439,43 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 		})
 	}
 
+	sendMessageTextOpenIfNeeded := func() bool {
+		if !sentMessageItemAdded {
+			item := dto.ResponsesOutput{
+				Type:    "message",
+				ID:      messageID,
+				Status:  "in_progress",
+				Role:    "assistant",
+				Content: []dto.ResponsesOutputContent{},
+			}
+			if !sendEvent(dto.ResponsesStreamResponse{
+				Type:        "response.output_item.added",
+				OutputIndex: common.GetPointer(0),
+				Item:        &item,
+			}) {
+				return false
+			}
+			sentMessageItemAdded = true
+		}
+		if !sentMessagePartAdded {
+			part := dto.ResponsesReasoningSummaryPart{
+				Type: "output_text",
+				Text: "",
+			}
+			if !sendEvent(dto.ResponsesStreamResponse{
+				Type:         "response.content_part.added",
+				ItemID:       messageID,
+				OutputIndex:  common.GetPointer(0),
+				ContentIndex: common.GetPointer(0),
+				Part:         &part,
+			}) {
+				return false
+			}
+			sentMessagePartAdded = true
+		}
+		return true
+	}
+
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 		var chunk dto.ChatCompletionsStreamResponse
 		if err := common.UnmarshalJsonStr(data, &chunk); err != nil {
@@ -464,6 +503,9 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 
 		for _, choice := range chunk.Choices {
 			if delta := choice.Delta.GetContentString(); delta != "" {
+				if !sendMessageTextOpenIfNeeded() {
+					return false
+				}
 				outputText.WriteString(delta)
 				if !sendEvent(dto.ResponsesStreamResponse{
 					Type:         "response.output_text.delta",
@@ -507,6 +549,21 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 
 	if outputText.Len() > 0 {
 		text := outputText.String()
+		if !sendMessageTextOpenIfNeeded() {
+			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response item/part start"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+		if !sendEvent(dto.ResponsesStreamResponse{
+			Type:         "response.content_part.done",
+			ItemID:       messageID,
+			OutputIndex:  common.GetPointer(0),
+			ContentIndex: common.GetPointer(0),
+			Part: &dto.ResponsesReasoningSummaryPart{
+				Type: "output_text",
+				Text: text,
+			},
+		}) {
+			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response.content_part.done"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
 		if !sendEvent(dto.ResponsesStreamResponse{
 			Type:         "response.output_text.done",
 			ItemID:       messageID,
@@ -520,7 +577,7 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 
 	output := make([]dto.ResponsesOutput, 0, 1+len(toolCalls))
 	if outputText.Len() > 0 {
-		output = append(output, dto.ResponsesOutput{
+		messageItem := dto.ResponsesOutput{
 			Type:   "message",
 			ID:     messageID,
 			Status: "completed",
@@ -531,7 +588,15 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 					Text: outputText.String(),
 				},
 			},
-		})
+		}
+		output = append(output, messageItem)
+		if !sendEvent(dto.ResponsesStreamResponse{
+			Type:        "response.output_item.done",
+			OutputIndex: common.GetPointer(0),
+			Item:        &messageItem,
+		}) {
+			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response.output_item.done(message)"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
 	}
 	for idx, state := range toolCalls {
 		callID := strings.TrimSpace(state.ID)

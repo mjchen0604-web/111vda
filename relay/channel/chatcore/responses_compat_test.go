@@ -2,12 +2,18 @@ package chatcore
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/gin-gonic/gin"
 )
 
 func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
@@ -146,5 +152,53 @@ func TestChatCompletionsToResponsesResponse(t *testing.T) {
 	if resp.Output[0].Type != "message" || len(resp.Output[0].Content) != 1 || resp.Output[0].Content[0].Text != "这是图片说明" {
 		raw, _ := json.Marshal(resp)
 		t.Fatalf("unexpected output content: %s", string(raw))
+	}
+}
+
+func TestResponsesCompatStreamHandlerEmitsAddedEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	constant.StreamingTimeout = 1
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx.Set(common.RequestIdKey, "chatcore_resp_stream")
+
+	streamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_123","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_123","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{"content":"图片描述"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_123","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+		``,
+	}, "\n")
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(streamBody)),
+		Header:     make(http.Header),
+	}
+	info := &relaycommon.RelayInfo{}
+
+	usage, err := responsesCompatStreamHandler(ctx, resp, info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage == nil || usage.TotalTokens != 15 {
+		t.Fatalf("unexpected usage: %#v", usage)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"type":"response.output_item.added"`) {
+		t.Fatalf("expected response.output_item.added, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"response.content_part.added"`) {
+		t.Fatalf("expected response.content_part.added, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"response.output_text.done"`) {
+		t.Fatalf("expected response.output_text.done, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"response.output_item.done"`) {
+		t.Fatalf("expected response.output_item.done, got %s", body)
 	}
 }
