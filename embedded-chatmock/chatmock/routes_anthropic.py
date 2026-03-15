@@ -24,6 +24,7 @@ from .upstream_errors import (
     should_retry_next_candidate,
 )
 from .upstream import normalize_model_name, resolve_upstream_mode, start_upstream_request
+from .utils import restore_reserved_tool_name, sanitize_reserved_tool_name
 
 
 anthropic_bp = Blueprint("anthropic", __name__)
@@ -318,7 +319,7 @@ def _convert_anthropic_tools(tools_payload: Any) -> tuple[List[Dict[str, Any]] |
         out.append(
             {
                 "type": "function",
-                "name": name,
+                "name": sanitize_reserved_tool_name(name),
                 "description": desc if isinstance(desc, str) else "",
                 "strict": False,
                 "parameters": schema,
@@ -353,7 +354,7 @@ def _convert_anthropic_tool_choice(choice_payload: Any) -> tuple[Any, bool, str 
         name = choice_payload.get("name")
         if not isinstance(name, str) or not name:
             return None, parallel, "tool_choice.type=tool requires non-empty name"
-        return {"type": "function", "name": name}, parallel, None
+        return {"type": "function", "name": sanitize_reserved_tool_name(name)}, parallel, None
     return None, parallel, "unsupported tool_choice.type"
 
 
@@ -366,7 +367,7 @@ def _tool_use_payload_from_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
     arguments = item.get("arguments") or "{}"
     return {
         "id": call_id,
-        "name": name,
+        "name": restore_reserved_tool_name(name),
         "input": _safe_json_object(arguments),
     }
 

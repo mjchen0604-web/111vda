@@ -33,6 +33,8 @@ from .utils import (
     RetryableStreamError,
     convert_chat_messages_to_responses_input,
     convert_tools_chat_to_responses,
+    restore_reserved_tool_name,
+    sanitize_reserved_tool_name,
     sse_translate_chat,
     sse_translate_text,
 )
@@ -333,7 +335,7 @@ def _consume_chat_completion_nonstream(
                             {
                                 "id": call_id,
                                 "type": "function",
-                                "function": {"name": name, "arguments": args},
+                                "function": {"name": restore_reserved_tool_name(name), "arguments": args},
                             }
                         )
             elif kind == "response.failed":
@@ -534,6 +536,21 @@ def chat_completions() -> Response:
     raw_tools_payload = payload.get("tools") if isinstance(payload.get("tools"), list) else []
     tools_responses = convert_tools_chat_to_responses(raw_tools_payload)
     tool_choice = payload.get("tool_choice", "auto")
+    if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        function_block = tool_choice.get("function")
+        if isinstance(function_block, dict) and isinstance(function_block.get("name"), str):
+            tool_choice = {
+                **tool_choice,
+                "function": {
+                    **function_block,
+                    "name": sanitize_reserved_tool_name(function_block.get("name")),
+                },
+            }
+    elif isinstance(tool_choice, dict) and isinstance(tool_choice.get("name"), str):
+        tool_choice = {
+            **tool_choice,
+            "name": sanitize_reserved_tool_name(tool_choice.get("name")),
+        }
     parallel_tool_calls = bool(payload.get("parallel_tool_calls", False))
     responses_tools_payload = payload.get("responses_tools") if isinstance(payload.get("responses_tools"), list) else []
     builtin_search_tools: List[Dict[str, Any]] = []

@@ -40,6 +40,24 @@ def eprint(*args, **kwargs) -> None:
     print(*args, file=sys.stderr, **kwargs)
 
 
+def sanitize_reserved_tool_name(name: Any) -> Any:
+    if not isinstance(name, str):
+        return name
+    normalized = name.strip()
+    if not normalized.startswith("mcp__"):
+        return normalized
+    return "tool_" + normalized
+
+
+def restore_reserved_tool_name(name: Any) -> Any:
+    if not isinstance(name, str):
+        return name
+    normalized = name.strip()
+    if not normalized.startswith("tool_mcp__"):
+        return normalized
+    return normalized[len("tool_"):]
+
+
 class RetryableStreamError(RuntimeError):
     def __init__(self, error_info: Dict[str, Any]) -> None:
         self.error_info = error_info
@@ -284,7 +302,7 @@ def convert_chat_messages_to_responses_input(messages: List[Dict[str, Any]]) -> 
                     input_items.append(
                         {
                             "type": "function_call",
-                            "name": name,
+                            "name": sanitize_reserved_tool_name(name),
                             "arguments": args,
                             "call_id": call_id,
                         }
@@ -338,7 +356,7 @@ def convert_tools_chat_to_responses(tools: Any) -> List[Dict[str, Any]]:
         out.append(
             {
                 "type": "function",
-                "name": name,
+                "name": sanitize_reserved_tool_name(name),
                 "description": desc or "",
                 "strict": False,
                 "parameters": params,
