@@ -138,9 +138,28 @@ const SettingsPanel = ({
         </div>
 
         <div className='space-y-3 rounded-xl border border-[var(--semi-color-border)] p-3'>
-          <Typography.Text strong className='text-sm'>
-            Prompt Mode
-          </Typography.Text>
+          <div className='flex items-center justify-between gap-3'>
+            <div>
+              <Typography.Text strong className='text-sm'>
+                提示词模式
+              </Typography.Text>
+              <Typography.Text className='text-xs text-gray-500 block mt-1'>
+                默认模式保留内置桥接提示词，原生模式跳过内置桥接提示词，可自行填写提示词。
+              </Typography.Text>
+            </div>
+            <div className='flex items-center gap-2 flex-shrink-0'>
+              <Typography.Text strong className='text-sm'>
+                是否真实应用
+              </Typography.Text>
+              <Switch
+                checked={applyToRealAPI}
+                onChange={onApplyToRealAPIChange}
+                checkedText={t('开')}
+                uncheckedText={t('关')}
+                size='small'
+              />
+            </div>
+          </div>
           <div className='grid grid-cols-2 gap-2'>
             <Button
               theme={inputs.promptMode === 'default' ? 'solid' : 'light'}
@@ -148,7 +167,7 @@ const SettingsPanel = ({
               onClick={() => onInputChange('promptMode', 'default')}
               className='!rounded-lg'
             >
-              Default
+              {t('默认')}
             </Button>
             <Button
               theme={inputs.promptMode === 'native' ? 'solid' : 'light'}
@@ -156,18 +175,15 @@ const SettingsPanel = ({
               onClick={() => onInputChange('promptMode', 'native')}
               className='!rounded-lg'
             >
-              Native
+              {t('原生格式')}
             </Button>
           </div>
-          <Typography.Text className='text-xs text-gray-500 block'>
-            Default keeps the built-in bridge prompts. Native skips them; enter a custom prompt or leave it blank for no extra prompt.
-          </Typography.Text>
           <TextArea
             value={inputs.systemPrompt || ''}
             onChange={(value) => onInputChange('systemPrompt', value)}
             disabled={inputs.promptMode !== 'native'}
             autosize={{ minRows: 4, maxRows: 10 }}
-            placeholder='Optional custom prompt for native mode. Leave blank to send no extra prompt.'
+            placeholder='原生模式下可选填写自定义提示词；留空则不额外附加提示词。'
             className='!rounded-lg'
           />
         </div>
@@ -199,26 +215,6 @@ const SettingsPanel = ({
               {effectHint}
             </Typography.Text>
           )}
-        </div>
-
-        <div>
-          <div className='flex items-center justify-between gap-3'>
-            <div>
-              <Typography.Text strong className='text-sm'>
-                {t('作用到真实 API')}
-              </Typography.Text>
-              <Typography.Text className='text-xs text-gray-500 block mt-1'>
-                {t('开启后，未显式传参的真实 API 请求也会继承这 5 个默认参数。')}
-              </Typography.Text>
-            </div>
-            <Switch
-              checked={applyToRealAPI}
-              onChange={onApplyToRealAPIChange}
-              checkedText={t('开')}
-              uncheckedText={t('关')}
-              size='small'
-            />
-          </div>
         </div>
 
         <div>
