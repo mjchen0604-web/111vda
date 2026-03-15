@@ -89,7 +89,7 @@ func loadPlaygroundRuntimePreviewConfig(c *gin.Context) (map[string]any, bool, b
 		mergePlaygroundConfigInto(merged, decodePlaygroundConfig("PlaygroundAdminDefaults"))
 	}
 	mergePlaygroundConfigInto(merged, sanitizePersonalPlaygroundConfig(userSetting.PlaygroundDefaults))
-	return merged, userSetting.PlaygroundApplyToRealAPI, true
+	return merged, resolvePlaygroundApplyToRealAPI(c, userSetting), true
 }
 
 func mergePlaygroundConfigInto(target map[string]any, source map[string]any) {

@@ -11,6 +11,7 @@ import (
 	relayclaude "github.com/QuantumNous/new-api/relay/channel/claude"
 	relayopenai "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -72,7 +73,17 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
-	return nil, errors.New("chatcore channel: /v1/responses is not supported by the embedded chat core")
+	if info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact {
+		return nil, errors.New("chatcore channel: /v1/responses/compact is not supported by the embedded chat core")
+	}
+	chatReq, err := responsesRequestToChatCompletionsRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	if info != nil {
+		info.RequestURLPath = "/v1/chat/completions"
+	}
+	return chatReq, nil
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
@@ -93,11 +104,17 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		fallthrough
 	case types.RelayFormatOpenAIRealtime:
 		fallthrough
-	case types.RelayFormatOpenAIResponses:
-		fallthrough
 	case types.RelayFormatOpenAIResponsesCompaction:
+		if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+			return nil, types.NewOpenAIError(errors.New("chatcore channel: /v1/responses/compact is not supported by the embedded chat core"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
+		}
 		adaptor := relayopenai.Adaptor{}
 		return adaptor.DoResponse(c, resp, info)
+	case types.RelayFormatOpenAIResponses:
+		if info.IsStream {
+			return responsesCompatStreamHandler(c, resp, info)
+		}
+		return responsesCompatHandler(c, resp, info)
 	default:
 		return nil, types.NewOpenAIError(fmt.Errorf("chatcore channel: unsupported relay format %s", info.RelayFormat), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
 	}

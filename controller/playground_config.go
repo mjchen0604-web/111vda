@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
@@ -59,7 +60,8 @@ type PlaygroundVisibilityRequest struct {
 }
 
 type PlaygroundApplyRequest struct {
-	Enabled bool `json:"enabled"`
+	Scope   string `json:"scope,omitempty"`
+	Enabled bool   `json:"enabled"`
 }
 
 func sanitizePlaygroundConfig(raw map[string]any) map[string]any {
@@ -154,6 +156,7 @@ func GetPlaygroundConfig(c *gin.Context) {
 		adminDefaults = decodePlaygroundConfig("PlaygroundAdminDefaults")
 	}
 	userSettings, _ := model.GetUserSetting(userID, false)
+	applyToRealAPI := resolvePlaygroundApplyToRealAPI(c, userSettings)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -161,7 +164,7 @@ func GetPlaygroundConfig(c *gin.Context) {
 			"globalDefaults":          decodePlaygroundConfig("PlaygroundGlobalDefaults"),
 			"adminDefaults":           adminDefaults,
 			"personalDefaults":        sanitizePersonalPlaygroundConfig(userSettings.PlaygroundDefaults),
-			"applyToRealAPI":          userSettings.PlaygroundApplyToRealAPI,
+			"applyToRealAPI":          applyToRealAPI,
 			"runtimeDefaultsPreview":  buildPlaygroundRuntimePreview(c),
 			"debugVisibility":         currentPlaygroundVisibility("PlaygroundDebugVisibility"),
 			"customRequestVisibility": currentPlaygroundVisibility("PlaygroundCustomRequestVisibility"),
@@ -259,24 +262,78 @@ func SavePlaygroundApplyToRealAPI(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid payload"})
 		return
 	}
-	userID := c.GetInt("id")
-	user, err := model.GetUserById(userID, true)
-	if err != nil {
-		common.ApiError(c, err)
-		return
+	scope := strings.ToLower(strings.TrimSpace(req.Scope))
+	if scope == "" {
+		scope = "personal"
 	}
-	userSetting := user.GetSetting()
-	userSetting.PlaygroundApplyToRealAPI = req.Enabled
-	user.SetSetting(userSetting)
-	if err := user.Update(false); err != nil {
-		common.ApiError(c, err)
+	switch scope {
+	case "global", "admin":
+		if c.GetInt("role") < common.RoleAdminUser {
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "admin only"})
+			return
+		}
+		optionKey := "PlaygroundGlobalApplyToRealAPI"
+		if scope == "admin" {
+			optionKey = "PlaygroundAdminApplyToRealAPI"
+		}
+		value := "false"
+		if req.Enabled {
+			value = "true"
+		}
+		if err := model.UpdateOption(optionKey, value); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	case "personal":
+		userID := c.GetInt("id")
+		user, err := model.GetUserById(userID, true)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		userSetting := user.GetSetting()
+		enabled := req.Enabled
+		userSetting.PlaygroundApplyToRealAPI = &enabled
+		user.SetSetting(userSetting)
+		if err := user.Update(false); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "scope must be personal, global, or admin"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
+			"scope":   scope,
 			"enabled": req.Enabled,
 		},
 	})
+}
+
+func currentPlaygroundApplyOption(optionKey string, fallback bool) bool {
+	common.OptionMapRWMutex.RLock()
+	value := strings.ToLower(strings.TrimSpace(common.OptionMap[optionKey]))
+	common.OptionMapRWMutex.RUnlock()
+	switch value {
+	case "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func resolvePlaygroundApplyToRealAPI(c *gin.Context, userSettings dto.UserSetting) bool {
+	enabled := currentPlaygroundApplyOption("PlaygroundGlobalApplyToRealAPI", true)
+	if c.GetInt("role") >= common.RoleAdminUser {
+		enabled = currentPlaygroundApplyOption("PlaygroundAdminApplyToRealAPI", enabled)
+	}
+	if userSettings.PlaygroundApplyToRealAPI != nil {
+		enabled = *userSettings.PlaygroundApplyToRealAPI
+	}
+	return enabled
 }

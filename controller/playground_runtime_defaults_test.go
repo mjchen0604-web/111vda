@@ -14,6 +14,10 @@ import (
 	"gorm.io/gorm"
 )
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 func TestApplyPlaygroundDefaultsToOpenAIRequest(t *testing.T) {
 	req := &dto.GeneralOpenAIRequest{}
 	topP := 0.9
@@ -145,7 +149,7 @@ func TestBuildPlaygroundRuntimePreviewMergesScopes(t *testing.T) {
 	}
 
 	seedPlaygroundUser(t, db, 1, common.RoleAdminUser, dto.UserSetting{
-		PlaygroundApplyToRealAPI: true,
+		PlaygroundApplyToRealAPI: boolPtr(true),
 		PlaygroundDefaults: map[string]any{
 			"inputs": map[string]any{
 				"temperature": 0.2,
@@ -199,7 +203,7 @@ func TestApplyPlaygroundRuntimeDefaultsFromStoredScopes(t *testing.T) {
 	}
 
 	seedPlaygroundUser(t, db, 2, common.RoleAdminUser, dto.UserSetting{
-		PlaygroundApplyToRealAPI: true,
+		PlaygroundApplyToRealAPI: boolPtr(true),
 		PlaygroundDefaults: map[string]any{
 			"inputs": map[string]any{
 				"temperature": 0.25,
@@ -231,5 +235,45 @@ func TestApplyPlaygroundRuntimeDefaultsFromStoredScopes(t *testing.T) {
 	}
 	if req.Seed == nil || *req.Seed != 11 {
 		t.Fatalf("expected personal seed to be injected, got %#v", req.Seed)
+	}
+}
+
+func TestBuildPlaygroundRuntimePreviewApplyToRealAPIPrecedence(t *testing.T) {
+	db := setupPlaygroundDefaultsTestDB(t)
+
+	if err := model.UpdateOption("PlaygroundGlobalApplyToRealAPI", "true"); err != nil {
+		t.Fatalf("failed to save global apply setting: %v", err)
+	}
+	if err := model.UpdateOption("PlaygroundAdminApplyToRealAPI", "false"); err != nil {
+		t.Fatalf("failed to save admin apply setting: %v", err)
+	}
+
+	seedPlaygroundUser(t, db, 3, common.RoleAdminUser, dto.UserSetting{
+		PlaygroundApplyToRealAPI: boolPtr(true),
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 3)
+	ctx.Set("role", common.RoleAdminUser)
+
+	preview := buildPlaygroundRuntimePreview(ctx)
+	if preview["applyToRealAPI"] != true {
+		t.Fatalf("expected personal applyToRealAPI=true to win, got %#v", preview["applyToRealAPI"])
+	}
+}
+
+func TestBuildPlaygroundRuntimePreviewApplyToRealAPIGlobalDefaultOn(t *testing.T) {
+	db := setupPlaygroundDefaultsTestDB(t)
+	seedPlaygroundUser(t, db, 4, common.RoleCommonUser, dto.UserSetting{})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 4)
+	ctx.Set("role", common.RoleCommonUser)
+
+	preview := buildPlaygroundRuntimePreview(ctx)
+	if preview["applyToRealAPI"] != true {
+		t.Fatalf("expected global default applyToRealAPI=true, got %#v", preview["applyToRealAPI"])
 	}
 }

@@ -211,12 +211,21 @@ const Playground = () => {
             };
 
       try {
-        const res = await API.post('/api/playground/config/defaults', {
-          scope: 'global',
-          config,
-        });
+        const [res, applyRes] = await Promise.all([
+          API.post('/api/playground/config/defaults', {
+            scope: 'global',
+            config,
+          }),
+          API.post('/api/playground/config/apply', {
+            scope: 'global',
+            enabled: true,
+          }),
+        ]);
         if (!res.data?.success) {
           throw new Error(res.data?.message || 'save failed');
+        }
+        if (!applyRes.data?.success) {
+          throw new Error(applyRes.data?.message || 'save apply failed');
         }
         showSuccess(
           mode === 'native-empty'
@@ -252,6 +261,7 @@ const Playground = () => {
           await savePersonalDefaults();
         }
         const res = await API.post('/api/playground/config/apply', {
+          scope: 'personal',
           enabled,
         });
         if (!res.data?.success) {

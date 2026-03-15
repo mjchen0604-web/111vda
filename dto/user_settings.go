@@ -17,7 +17,7 @@ type UserSetting struct {
 	BillingPreference                string         `json:"billing_preference,omitempty"`
 	Language                         string         `json:"language,omitempty"`
 	PlaygroundDefaults               map[string]any `json:"playground_defaults,omitempty"`
-	PlaygroundApplyToRealAPI         bool           `json:"playground_apply_to_real_api,omitempty"`
+	PlaygroundApplyToRealAPI         *bool          `json:"playground_apply_to_real_api,omitempty"`
 }
 
 var (

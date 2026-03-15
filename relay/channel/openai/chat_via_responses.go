@@ -127,6 +127,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	toolCallArgsByID := make(map[string]string)
 	toolCallNameSent := make(map[string]bool)
 	toolCallCanonicalIDByItemID := make(map[string]string)
+	textByKey := make(map[string]string)
 	hasSentReasoningSummary := false
 	needsReasoningSummarySeparator := false
 	//reasoningSummaryTextByKey := make(map[string]string)
@@ -307,6 +308,46 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return true
 	}
 
+	sendOutputTextDelta := func(delta string) bool {
+		if delta == "" {
+			return true
+		}
+		if !sendStartIfNeeded() {
+			return false
+		}
+
+		outputText.WriteString(delta)
+		usageText.WriteString(delta)
+		chunk := &dto.ChatCompletionsStreamResponse{
+			Id:      responseId,
+			Object:  "chat.completion.chunk",
+			Created: createAt,
+			Model:   model,
+			Choices: []dto.ChatCompletionsStreamResponseChoice{
+				{
+					Index: 0,
+					Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+						Content: &delta,
+					},
+				},
+			},
+		}
+		return sendChatChunk(chunk)
+	}
+
+	appendOutputTextByKey := func(key string, text string) bool {
+		if text == "" {
+			return true
+		}
+		if key == "" {
+			return sendOutputTextDelta(text)
+		}
+		prev := textByKey[key]
+		delta := stringDeltaFromPrefix(prev, text)
+		textByKey[key] = text
+		return sendOutputTextDelta(delta)
+	}
+
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 		if streamErr != nil {
 			return false
@@ -364,35 +405,46 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		//	}
 
 		case "response.output_text.delta":
-			if !sendStartIfNeeded() {
+			key := responsesStreamIndexKey(strings.TrimSpace(streamResp.ItemID), streamResp.ContentIndex)
+			if key != "" && streamResp.Delta != "" {
+				textByKey[key] += streamResp.Delta
+			}
+			if !sendOutputTextDelta(streamResp.Delta) {
 				return false
 			}
 
-			if streamResp.Delta != "" {
-				outputText.WriteString(streamResp.Delta)
-				usageText.WriteString(streamResp.Delta)
-				delta := streamResp.Delta
-				chunk := &dto.ChatCompletionsStreamResponse{
-					Id:      responseId,
-					Object:  "chat.completion.chunk",
-					Created: createAt,
-					Model:   model,
-					Choices: []dto.ChatCompletionsStreamResponseChoice{
-						{
-							Index: 0,
-							Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
-								Content: &delta,
-							},
-						},
-					},
-				}
-				if !sendChatChunk(chunk) {
-					return false
-				}
+		case "response.output_text.done":
+			key := responsesStreamIndexKey(strings.TrimSpace(streamResp.ItemID), streamResp.ContentIndex)
+			if !appendOutputTextByKey(key, streamResp.Text) {
+				return false
+			}
+
+		case "response.content_part.done":
+			if streamResp.Part == nil || streamResp.Part.Type != "output_text" {
+				break
+			}
+			key := responsesStreamIndexKey(strings.TrimSpace(streamResp.ItemID), streamResp.ContentIndex)
+			if !appendOutputTextByKey(key, streamResp.Part.Text) {
+				return false
 			}
 
 		case "response.output_item.added", "response.output_item.done":
 			if streamResp.Item == nil {
+				break
+			}
+			if streamResp.Item.Type == "message" {
+				if streamResp.Item.Role != "" && streamResp.Item.Role != "assistant" {
+					break
+				}
+				var fullText strings.Builder
+				for _, content := range streamResp.Item.Content {
+					if content.Type == "output_text" && content.Text != "" {
+						fullText.WriteString(content.Text)
+					}
+				}
+				if !appendOutputTextByKey(strings.TrimSpace(streamResp.Item.ID), fullText.String()) {
+					return false
+				}
 				break
 			}
 			if streamResp.Item.Type != "function_call" {
@@ -473,6 +525,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 					}
 					if streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
 						usage.CompletionTokenDetails.ReasoningTokens = streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens
+					}
+				}
+				if outputText.Len() == 0 {
+					if !sendOutputTextDelta(service.ExtractOutputTextFromResponses(streamResp.Response)) {
+						return false
 					}
 				}
 			}
