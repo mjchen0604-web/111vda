@@ -193,6 +193,44 @@ const Playground = () => {
     [inputs, parameterEnabled, loadPlaygroundConfig],
   );
 
+  const saveGlobalPromptPreset = useCallback(
+    async (mode) => {
+      const config =
+        mode === 'native-empty'
+          ? {
+              inputs: {
+                promptMode: 'native',
+                systemPrompt: '',
+              },
+            }
+          : {
+              inputs: {
+                promptMode: 'default',
+                systemPrompt: '',
+              },
+            };
+
+      try {
+        const res = await API.post('/api/playground/config/defaults', {
+          scope: 'global',
+          config,
+        });
+        if (!res.data?.success) {
+          throw new Error(res.data?.message || 'save failed');
+        }
+        showSuccess(
+          mode === 'native-empty'
+            ? '已切换全局默认为空提示词'
+            : '已切换全局默认为内置提示词',
+        );
+        await loadPlaygroundConfig();
+      } catch (error) {
+        showError(error);
+      }
+    },
+    [loadPlaygroundConfig],
+  );
+
   const savePersonalDefaults = useCallback(async () => {
     const res = await API.post('/api/playground/config/defaults', {
       scope: 'personal',
@@ -562,6 +600,7 @@ const Playground = () => {
     ? {
         enabled: true,
         onSaveDefaults: saveScopedDefaults,
+        onSaveGlobalPromptPreset: saveGlobalPromptPreset,
         debugVisibility: featureFlags.debugVisibility,
         customRequestVisibility: featureFlags.customRequestVisibility,
         onSaveVisibility: saveVisibility,

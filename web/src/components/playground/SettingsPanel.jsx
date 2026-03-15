@@ -141,15 +141,17 @@ const SettingsPanel = ({
           <div className='flex items-center justify-between gap-3'>
             <div>
               <Typography.Text strong className='text-sm'>
-                提示词模式
+                {t('提示词模式')}
               </Typography.Text>
               <Typography.Text className='text-xs text-gray-500 block mt-1'>
-                默认模式保留内置桥接提示词，原生模式跳过内置桥接提示词，可自行填写提示词。
+                {t(
+                  '默认模式保留内置桥接提示词，原生模式跳过内置桥接提示词，可自行填写提示词。',
+                )}
               </Typography.Text>
             </div>
             <div className='flex items-center gap-2 flex-shrink-0'>
               <Typography.Text strong className='text-sm'>
-                是否真实应用
+                {t('是否真实应用')}
               </Typography.Text>
               <Switch
                 checked={applyToRealAPI}
@@ -183,9 +185,46 @@ const SettingsPanel = ({
             onChange={(value) => onInputChange('systemPrompt', value)}
             disabled={inputs.promptMode !== 'native'}
             autosize={{ minRows: 4, maxRows: 10 }}
-            placeholder='原生模式下可选填写自定义提示词；留空则不额外附加提示词。'
+            placeholder={t(
+              '原生模式下可选填写自定义提示词；留空则不额外附加提示词。',
+            )}
             className='!rounded-lg'
           />
+
+          {adminControls?.enabled && (
+            <div className='rounded-lg bg-[var(--semi-color-fill-0)] p-3'>
+              <Typography.Text strong className='text-sm block mb-2'>
+                {t('管理员快捷切换全局默认提示词')}
+              </Typography.Text>
+              <Typography.Text className='text-xs text-gray-500 block mb-3'>
+                {t(
+                  '此操作只修改全局默认，用户个人默认仍然优先于管理员和全局默认。',
+                )}
+              </Typography.Text>
+              <div className='grid grid-cols-2 gap-2'>
+                <Button
+                  theme='outline'
+                  type='secondary'
+                  onClick={() =>
+                    adminControls.onSaveGlobalPromptPreset?.('default')
+                  }
+                  className='!rounded-lg'
+                >
+                  {t('全局默认提示词')}
+                </Button>
+                <Button
+                  theme='outline'
+                  type='warning'
+                  onClick={() =>
+                    adminControls.onSaveGlobalPromptPreset?.('native-empty')
+                  }
+                  className='!rounded-lg'
+                >
+                  {t('全局空提示词')}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
