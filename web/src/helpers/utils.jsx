@@ -862,9 +862,6 @@ export const getLongContextPricingNote = (record, t = (key) => key) => {
   if (!modelName.startsWith('gpt-5.4')) {
     return null;
   }
-  if (modelName.includes('-fast') || modelName.includes('-turbo')) {
-    return t('注：输入上下文 >272K 且 <=1M 时，按普通同档价格 4x 计费');
-  }
   return t('注：输入上下文 >272K 且 <=1M 时，按当前价格 2x 计费');
 };
 

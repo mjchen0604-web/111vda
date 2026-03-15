@@ -32,5 +32,5 @@ func GetLongContextPricingMultiplier(modelName string, promptTokens int) float64
 	if !SupportsLongContextSurcharge(modelName) {
 		return 1
 	}
-	return 4
+	return 2
 }

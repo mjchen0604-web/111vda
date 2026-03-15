@@ -11,8 +11,8 @@ func TestSeedDefaultGPTPricingUsesMediumForBaseModels(t *testing.T) {
 		wantCacheRatio  float64
 		wantOutputRatio float64
 	}{
-		{model: "gpt-5.4", wantModelRatio: 1.25, wantCacheRatio: 0.1, wantOutputRatio: 6.0},
-		{model: "gpt-5.4-fast", wantModelRatio: 2.5, wantCacheRatio: 0.1, wantOutputRatio: 6.0},
+		{model: "gpt-5.4", wantModelRatio: 2.5, wantCacheRatio: 0.1, wantOutputRatio: 6.0},
+		{model: "gpt-5.4-fast", wantModelRatio: 5.0, wantCacheRatio: 0.1, wantOutputRatio: 6.0},
 		{model: "gpt-5.2", wantModelRatio: 0.875, wantCacheRatio: 0.1, wantOutputRatio: 8.0},
 		{model: "gpt-5.2-codex", wantModelRatio: 0.875, wantCacheRatio: 0.1, wantOutputRatio: 8.0},
 		{model: "gpt-5", wantModelRatio: 0.625, wantCacheRatio: 0.1, wantOutputRatio: 8.0},

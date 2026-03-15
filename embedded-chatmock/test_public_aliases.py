@@ -29,11 +29,11 @@ class PublicAliasTests(unittest.TestCase):
     def test_public_model_name_rewrites_fast_suffix(self):
         self.assertEqual(
             public_model_name("gpt-5.4-fast-xhigh"),
-            "gpt-5.4-lightning-xhigh",
+            "gpt-5.4-fast-xhigh",
         )
         self.assertEqual(
-            public_model_name("gpt-5.4-fast"),
-            "gpt-5.4-lightning",
+            public_model_name("gpt-5.4-lightning"),
+            "gpt-5.4-fast",
         )
 
 

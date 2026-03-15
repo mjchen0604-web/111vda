@@ -163,7 +163,7 @@ def public_model_name(model: str | None) -> str | None:
     if not isinstance(model, str) or not model.strip():
         return model
     normalized = model.strip()
-    normalized = normalized.replace("-fast-", "-lightning-")
-    if normalized.endswith("-fast"):
-        normalized = normalized[: -len("-fast")] + "-lightning"
+    normalized = normalized.replace("-lightning-", "-fast-")
+    if normalized.endswith("-lightning"):
+        normalized = normalized[: -len("-lightning")] + "-fast"
     return normalized

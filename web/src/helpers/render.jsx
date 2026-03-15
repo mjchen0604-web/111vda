@@ -734,9 +734,9 @@ export function stringToColor(str) {
 export function toPublicModelName(modelName) {
   if (!modelName || typeof modelName !== 'string') return modelName;
   let normalized = modelName;
-  normalized = normalized.replaceAll('-fast-', '-lightning-');
-  if (normalized.endsWith('-fast')) {
-    normalized = normalized.slice(0, -5) + '-lightning';
+  normalized = normalized.replaceAll('-lightning-', '-fast-');
+  if (normalized.endsWith('-lightning')) {
+    normalized = normalized.slice(0, -10) + '-fast';
   }
   return normalized;
 }
