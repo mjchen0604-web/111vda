@@ -493,6 +493,8 @@ class CodexAppServerUpstream:
 
         try:
             turn_request_id = f"turn-start-{uuid.uuid4().hex}"
+            turn_id = f"resp_{uuid.uuid4().hex}"
+            observed_service_tier = self._observed_service_tier or self._service_tier
             codex_input = convert_responses_input_to_codex_input(self._input_items)
             turn_params: Dict[str, Any] = {
                 "threadId": self._thread_id,
@@ -510,11 +512,21 @@ class CodexAppServerUpstream:
                 turn_params["serviceTier"] = self._service_tier
 
             self._send_rpc(turn_request_id, "turn/start", turn_params)
+            yield _encode(
+                {
+                    "type": "response.created",
+                    "response": {
+                        "id": turn_id,
+                        "service_tier": observed_service_tier,
+                    },
+                }
+            )
             turn_response = self._recv_until_id(turn_request_id)
             turn_result = turn_response.get("result") if isinstance(turn_response, dict) else None
             turn = turn_result.get("turn") if isinstance(turn_result, dict) else None
-            turn_id = turn.get("id") if isinstance(turn, dict) and isinstance(turn.get("id"), str) else f"resp_{uuid.uuid4().hex}"
-            observed_service_tier = self._observed_service_tier or self._service_tier
+            actual_turn_id = turn.get("id") if isinstance(turn, dict) and isinstance(turn.get("id"), str) else ""
+            if actual_turn_id:
+                turn_id = actual_turn_id
 
             if not isinstance(turn_result, dict) or not isinstance(turn, dict):
                 status_code = self._extract_error_status(turn_response)
@@ -582,16 +594,6 @@ class CodexAppServerUpstream:
                 )
                 yield _done()
                 return
-
-            yield _encode(
-                {
-                    "type": "response.created",
-                    "response": {
-                        "id": turn_id,
-                        "service_tier": observed_service_tier,
-                    },
-                }
-            )
 
             saw_output_delta = False
             output_delta_source: str | None = None
