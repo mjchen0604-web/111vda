@@ -397,6 +397,7 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
     text_open = False
     text_index = -1
     emitted_output_text = ""
+    saw_completed = False
 
     def _emit_text_delta(delta_text: str) -> str | None:
         nonlocal text_open, text_index, next_block_index, emitted_output_text
@@ -543,6 +544,7 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                 return
 
             if kind == "response.completed":
+                saw_completed = True
                 emitted_output_text, missing_delta = merge_response_text(
                     emitted_output_text,
                     extract_response_output_text(evt.get("response")),
@@ -552,6 +554,17 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                         yield chunk
                 break
 
+        if not saw_completed and not emitted_output_text and stop_reason != "tool_use":
+            error_info = build_error_info(
+                source=getattr(upstream, "chatmock_source", "upstream"),
+                phase="stream",
+                raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                raw_message="stream ended before response.completed",
+                raw_body={"message": "stream ended before response.completed"},
+            )
+            payload = build_anthropic_error_response(error_info).get_json()
+            yield _emit("error", payload)
+            return
         if text_open:
             yield _emit("content_block_stop", {"type": "content_block_stop", "index": text_index})
 
@@ -778,6 +791,17 @@ def messages() -> Response:
                 raw_body={"message": error_message},
             )
         return build_anthropic_error_response(error_info)
+
+    if not completed_ok and not full_text and not tool_calls:
+        return build_anthropic_error_response(
+            build_error_info(
+                source=getattr(upstream, "chatmock_source", "upstream"),
+                phase="stream",
+                raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                raw_message="stream ended before response.completed",
+                raw_body={"message": "stream ended before response.completed"},
+            )
+        )
 
     content: List[Dict[str, Any]] = []
     stop_reason = "end_turn"

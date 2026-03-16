@@ -1528,6 +1528,7 @@ def sse_translate_chat(
     ws_state: dict[str, Any] = {}
     ws_index: dict[str, int] = {}
     ws_next_index: int = 0
+    saw_completed = False
     
     def _serialize_tool_args(eff_args: Any) -> str:
         """
@@ -1864,6 +1865,7 @@ def sse_translate_chat(
                 yield b"data: [DONE]\n\n"
                 break
             elif kind == "response.completed":
+                saw_completed = True
                 m = _extract_usage(evt)
                 if m:
                     upstream_usage = m
@@ -1928,6 +1930,7 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
     upstream_usage = None
     has_visible_output = False
     emitted_output_text = ""
+    saw_completed = False
     
     def _extract_usage(evt: Dict[str, Any]) -> Dict[str, int] | None:
         try:
@@ -2036,6 +2039,7 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
                     }
                     yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
             elif kind == "response.completed":
+                saw_completed = True
                 m = _extract_usage(evt)
                 if m:
                     upstream_usage = m
@@ -2080,5 +2084,31 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
                 break
+        if not saw_completed:
+            error_info = normalized_error_payload(
+                build_error_info(
+                    source=getattr(upstream, "chatmock_source", "upstream"),
+                    phase="stream",
+                    raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                    raw_message="stream ended before response.completed",
+                    raw_body={"message": "stream ended before response.completed"},
+                )
+            )
+            if not has_visible_output:
+                if should_retry_next_candidate(error_info):
+                    raise RetryableStreamError(error_info)
+                chunk = {"error": error_info}
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            chunk = {
+                "id": response_id,
+                "object": "text_completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "text": "", "finish_reason": "stop"}],
+            }
+            yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
     finally:
         upstream.close()
