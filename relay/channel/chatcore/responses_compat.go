@@ -142,7 +142,7 @@ func normalizeResponsesContent(raw any, role string) any {
 	}
 }
 
-func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest) (*dto.GeneralOpenAIRequest, error) {
+func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest) (map[string]any, error) {
 	chatReq := &dto.GeneralOpenAIRequest{
 		Model:                request.Model,
 		Stream:               request.Stream,
@@ -186,6 +186,7 @@ func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest
 			chatReq.ToolChoice = toolChoice
 		}
 	}
+	responsesTools := make([]map[string]any, 0)
 	if len(request.Tools) > 0 {
 		var rawTools []map[string]any
 		if err := common.Unmarshal(request.Tools, &rawTools); err == nil {
@@ -194,6 +195,10 @@ func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest
 				toolType := common.Interface2String(rawTool["type"])
 				if toolType == "" {
 					toolType = "function"
+				}
+				if toolType == "web_search" || toolType == "web_search_preview" {
+					responsesTools = append(responsesTools, map[string]any{"type": toolType})
+					continue
 				}
 				tool := dto.ToolCallRequest{
 					Type: toolType,
@@ -295,7 +300,17 @@ func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest
 	}
 
 	chatReq.Messages = messages
-	return chatReq, nil
+	chatReqMap := chatReq.ToMap()
+	chatReqMap["_chatcore_responses_compat"] = true
+	if len(responsesTools) > 0 {
+		chatReqMap["responses_tools"] = responsesTools
+	}
+	if toolChoice := rawMessageToAny(request.ToolChoice); toolChoice != nil {
+		if text, ok := toolChoice.(string); ok && strings.TrimSpace(text) != "" {
+			chatReqMap["responses_tool_choice"] = text
+		}
+	}
+	return chatReqMap, nil
 }
 
 func createdAtToInt(value any) int {

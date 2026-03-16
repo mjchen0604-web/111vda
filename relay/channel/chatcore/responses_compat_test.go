@@ -1,7 +1,6 @@
 package chatcore
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -32,25 +31,25 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 	input, _ := common.Marshal([]map[string]any{
 		{
 			"role":    "developer",
-			"content": "你是一个助手",
+			"content": "you are a helper",
 		},
 		{
 			"role": "user",
 			"content": []map[string]any{
-				{"type": "input_text", "text": "看这张图"},
+				{"type": "input_text", "text": "look at this image"},
 				{"type": "input_image", "image_url": "https://example.com/image.png"},
 			},
 		},
 		{
 			"role": "assistant",
 			"content": []map[string]any{
-				{"type": "output_text", "text": "这是一张图"},
+				{"type": "output_text", "text": "this is an image"},
 			},
 		},
 	})
 
 	req := dto.OpenAIResponsesRequest{
-		Model:       "gpt-5.4-lightning",
+		Model:       "gpt-5.4-fast",
 		Input:       input,
 		Stream:      &stream,
 		Temperature: &temperature,
@@ -62,27 +61,76 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if chatReq.Model != "gpt-5.4-lightning" {
-		t.Fatalf("unexpected model: %s", chatReq.Model)
+	if chatReq["model"] != "gpt-5.4-fast" {
+		t.Fatalf("unexpected model: %#v", chatReq["model"])
 	}
-	if chatReq.Stream == nil || !*chatReq.Stream {
-		t.Fatalf("expected stream=true, got %#v", chatReq.Stream)
+	if streamValue, ok := chatReq["stream"].(bool); !ok || !streamValue {
+		t.Fatalf("expected stream=true, got %#v", chatReq["stream"])
 	}
-	if len(chatReq.Messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(chatReq.Messages))
+	messagesPayload, ok := chatReq["messages"].([]any)
+	if !ok || len(messagesPayload) != 3 {
+		t.Fatalf("expected 3 messages, got %#v", chatReq["messages"])
 	}
-	if chatReq.Messages[0].Role != "developer" || chatReq.Messages[0].StringContent() != "你是一个助手" {
-		t.Fatalf("unexpected developer message: %#v", chatReq.Messages[0])
+	firstMessage, _ := messagesPayload[0].(map[string]any)
+	if firstMessage["role"] != "developer" || firstMessage["content"] != "you are a helper" {
+		t.Fatalf("unexpected developer message: %#v", firstMessage)
 	}
-	content := chatReq.Messages[1].ParseContent()
-	if len(content) != 2 {
-		t.Fatalf("expected user mixed content, got %#v", content)
+	secondMessage, _ := messagesPayload[1].(map[string]any)
+	contentPayload, ok := secondMessage["content"].([]any)
+	if !ok || len(contentPayload) != 2 {
+		t.Fatalf("expected user mixed content, got %#v", secondMessage["content"])
 	}
-	if chatReq.ToolChoice != "auto" {
-		t.Fatalf("expected tool_choice=auto, got %#v", chatReq.ToolChoice)
+	if chatReq["tool_choice"] != "auto" {
+		t.Fatalf("expected tool_choice=auto, got %#v", chatReq["tool_choice"])
 	}
-	if len(chatReq.Tools) != 1 || chatReq.Tools[0].Function.Name != "test_tool" {
-		t.Fatalf("unexpected tools: %#v", chatReq.Tools)
+	toolsPayload, ok := chatReq["tools"].([]any)
+	if !ok || len(toolsPayload) != 1 {
+		t.Fatalf("unexpected tools: %#v", chatReq["tools"])
+	}
+}
+
+func TestResponsesRequestToChatCompletionsRequestPreservesBuiltInSearchTools(t *testing.T) {
+	toolChoice, _ := common.Marshal("auto")
+	tools, _ := common.Marshal([]map[string]any{
+		{"type": "web_search"},
+		{
+			"type": "function",
+			"name": "mcp__CherryHub__list",
+			"parameters": map[string]any{"type": "object"},
+		},
+	})
+	input, _ := common.Marshal([]map[string]any{
+		{
+			"role": "user",
+			"content": []map[string]any{
+				{"type": "input_text", "text": "today news"},
+			},
+		},
+	})
+
+	converted, err := responsesRequestToChatCompletionsRequest(dto.OpenAIResponsesRequest{
+		Model:      "gpt-5.4",
+		Input:      input,
+		ToolChoice: toolChoice,
+		Tools:      tools,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if converted["_chatcore_responses_compat"] != true {
+		t.Fatalf("expected _chatcore_responses_compat flag, got %#v", converted["_chatcore_responses_compat"])
+	}
+	responsesTools, ok := converted["responses_tools"].([]map[string]any)
+	if !ok || len(responsesTools) != 1 || responsesTools[0]["type"] != "web_search" {
+		t.Fatalf("expected responses_tools to preserve built-in search, got %#v", converted["responses_tools"])
+	}
+	toolsPayload, ok := converted["tools"].([]any)
+	if !ok || len(toolsPayload) != 1 {
+		t.Fatalf("expected one function tool in tools payload, got %#v", converted["tools"])
+	}
+	if converted["responses_tool_choice"] != "auto" {
+		t.Fatalf("expected responses_tool_choice=auto, got %#v", converted["responses_tool_choice"])
 	}
 }
 
@@ -98,11 +146,11 @@ func TestChatcoreAdaptorConvertResponsesRequestRewritesPath(t *testing.T) {
 	input, _ := common.Marshal([]map[string]any{
 		{
 			"role":    "user",
-			"content": "你好",
+			"content": "hello",
 		},
 	})
 	converted, err := adaptor.ConvertOpenAIResponsesRequest(nil, info, dto.OpenAIResponsesRequest{
-		Model: "gpt-5.4-lightning",
+		Model: "gpt-5.4",
 		Input: input,
 	})
 	if err != nil {
@@ -111,8 +159,8 @@ func TestChatcoreAdaptorConvertResponsesRequestRewritesPath(t *testing.T) {
 	if info.RequestURLPath != "/v1/chat/completions" {
 		t.Fatalf("expected rewritten path, got %s", info.RequestURLPath)
 	}
-	if _, ok := converted.(*dto.GeneralOpenAIRequest); !ok {
-		t.Fatalf("expected *dto.GeneralOpenAIRequest, got %T", converted)
+	if _, ok := converted.(map[string]any); !ok {
+		t.Fatalf("expected map[string]any, got %T", converted)
 	}
 }
 
@@ -121,13 +169,13 @@ func TestChatCompletionsToResponsesResponse(t *testing.T) {
 		Id:      "chatcmpl_123",
 		Object:  "chat.completion",
 		Created: 123,
-		Model:   "gpt-5.4-lightning",
+		Model:   "gpt-5.4-fast",
 		Choices: []dto.OpenAITextResponseChoice{
 			{
 				Index: 0,
 				Message: dto.Message{
 					Role:    "assistant",
-					Content: "这是图片说明",
+					Content: "image description",
 				},
 				FinishReason: "stop",
 			},
@@ -149,9 +197,8 @@ func TestChatCompletionsToResponsesResponse(t *testing.T) {
 	if len(resp.Output) != 1 {
 		t.Fatalf("expected 1 output item, got %#v", resp.Output)
 	}
-	if resp.Output[0].Type != "message" || len(resp.Output[0].Content) != 1 || resp.Output[0].Content[0].Text != "这是图片说明" {
-		raw, _ := json.Marshal(resp)
-		t.Fatalf("unexpected output content: %s", string(raw))
+	if resp.Output[0].Type != "message" || len(resp.Output[0].Content) != 1 || resp.Output[0].Content[0].Text != "image description" {
+		t.Fatalf("unexpected output content: %#v", resp.Output)
 	}
 }
 
@@ -167,7 +214,7 @@ func TestResponsesCompatStreamHandlerEmitsAddedEvents(t *testing.T) {
 	streamBody := strings.Join([]string{
 		`data: {"id":"chatcmpl_123","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`,
 		``,
-		`data: {"id":"chatcmpl_123","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{"content":"图片描述"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_123","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{"content":"image description"},"finish_reason":null}]}`,
 		``,
 		`data: {"id":"chatcmpl_123","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
 		``,
