@@ -168,7 +168,7 @@ function renderAccounts(payload) {
               <div class="account-file">${acc.label || "-"}</div>
               <div class="account-mail">${acc.source || "-"}</div>
             </div>
-            <div class="account-file">status: ${acc.status || "ready"} / ${acc.last_status ?? "-"}</div>
+            <div class="account-file">status: ${acc.fast_status || acc.status || "ready"} / ${acc.last_status ?? "-"}</div>
           </div>
           <div class="account-meta">
             <div>account: ${acc.account_id || "-"}</div>
@@ -181,6 +181,9 @@ function renderAccounts(payload) {
             <div>raw message: ${acc.last_raw_message || "-"}</div>
             <div>fast: ${acc.fast_status || "-"} ${acc.fast_port ? `@${acc.fast_port}` : ""}</div>
             <div>fast requests: ${acc.fast_request_successes || 0}/${acc.fast_request_count || 0}</div>
+            <div>fast failures: ${acc.fast_request_failures || 0}</div>
+            <div>fast cooldown: ${acc.fast_cooldown_remaining || 0}s</div>
+            <div>fast error: ${acc.fast_last_request_error || acc.fast_last_error || "-"}</div>
           </div>
           ${tokenPill("access", Boolean(acc.has_access_token))}
           ${tokenPill("refresh", Boolean(acc.has_refresh_token))}

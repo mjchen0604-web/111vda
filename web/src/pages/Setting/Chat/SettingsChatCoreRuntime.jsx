@@ -67,6 +67,15 @@ const formatAccountStatus = (record) => {
     return '-';
   }
 
+  const fastStatus = String(record.fast_status || '').trim();
+  const fastListening = Boolean(record.fast_listening);
+  const fastLastError = String(
+    record.fast_last_request_error || record.fast_last_error || '',
+  ).trim();
+  const fastCooldownRemaining = Number(record.fast_cooldown_remaining || 0);
+  const fastUnlockAt = String(record.fast_unlock_at || '').trim();
+  const fastRequestFailures = Number(record.fast_request_failures || 0);
+
   const status = String(record.status || '').trim();
   const lastStatus = record.last_status;
   const lastClassification = String(record.last_classification || '').trim();
@@ -75,6 +84,24 @@ const formatAccountStatus = (record) => {
   const unlockAt = String(record.unlock_at || '').trim();
 
   const parts = [];
+
+  if (fastStatus) {
+    parts.push(
+      fastListening ? `fast:${fastStatus}` : `fast:${fastStatus}(not-listening)`,
+    );
+  }
+  if (fastCooldownRemaining > 0) {
+    parts.push(`fast cooldown ${fastCooldownRemaining}s`);
+  }
+  if (fastUnlockAt) {
+    parts.push(`fast until ${fastUnlockAt}`);
+  }
+  if (Number.isFinite(fastRequestFailures) && fastRequestFailures > 0) {
+    parts.push(`fast failures ${fastRequestFailures}`);
+  }
+  if (fastLastError) {
+    parts.push(fastLastError);
+  }
 
   if (Number.isFinite(lastStatus) && lastStatus > 0) {
     parts.push(`HTTP ${lastStatus}`);

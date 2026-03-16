@@ -595,12 +595,19 @@ def dashboard_accounts():
         instance = instance_map.get(parent_label) if parent_label else None
         if isinstance(instance, dict):
             record["fast_status"] = instance.get("status")
+            record["fast_listening"] = instance.get("listening")
             record["fast_port"] = instance.get("port")
             record["fast_url"] = instance.get("url")
             record["fast_pid"] = instance.get("pid")
             record["fast_cooldown_remaining"] = instance.get("cooldownRemaining")
+            record["fast_cooldown_until"] = instance.get("cooldownUntil")
+            record["fast_unlock_at"] = instance.get("unlockAt")
+            record["fast_request_failures"] = instance.get("requestFailures")
             record["fast_request_count"] = instance.get("requestCount")
             record["fast_request_successes"] = instance.get("requestSuccesses")
+            record["fast_last_request_error"] = instance.get("lastRequestError")
+            record["fast_last_error"] = instance.get("lastError")
+            record["fast_last_exit_code"] = instance.get("lastExitCode")
     active_records = [record for record in records if _is_active_account_record(record)]
     return jsonify({"count": len(active_records), "rawCount": len(records), "accounts": active_records})
 
