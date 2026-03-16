@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import datetime
+import glob
 import hashlib
 import json
 import os
@@ -903,19 +904,20 @@ def _load_auth_candidates_from_pool_file(ensure_fresh: bool = True) -> List[Dict
 
 def _dedupe_candidates_by_account_id(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     deduped: List[Dict[str, Any]] = []
-    seen_account_ids: set[str] = set()
+    seen_entries: set[str] = set()
     seen_labels: set[str] = set()
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
         label = str(candidate.get("label") or "").strip()
         account_id = str(candidate.get("account_id") or "").strip()
-        dedupe_key = account_id or label
+        source_path = str(candidate.get("source_path") or candidate.get("auth_path") or "").strip()
+        dedupe_key = source_path or label or account_id
         if not dedupe_key:
             continue
-        if dedupe_key in seen_account_ids or label in seen_labels:
+        if dedupe_key in seen_entries or label in seen_labels:
             continue
-        seen_account_ids.add(dedupe_key)
+        seen_entries.add(dedupe_key)
         if label:
             seen_labels.add(label)
         deduped.append(candidate)
@@ -1433,15 +1435,35 @@ def get_chatgpt_auth_records() -> List[Dict[str, Any]]:
 
 def _parse_auth_files_env() -> List[str]:
     raw = (os.getenv("CHATGPT_LOCAL_AUTH_FILES") or "").strip()
-    if not raw:
-        return []
     paths: List[str] = []
-    for part in raw.split(","):
-        path = part.strip()
-        if not path:
+    if raw:
+        for part in raw.split(","):
+            path = part.strip()
+            if path and path not in paths:
+                paths.append(path)
+
+    roots: List[str] = []
+    explicit_root = (os.getenv("CHATMOCK_DASHBOARD_AUTH_DIR") or "").strip()
+    if explicit_root:
+        roots.append(explicit_root)
+    data_dir = (os.getenv("CHATMOCK_DATA_DIR") or "").strip()
+    if data_dir:
+        roots.append(os.path.join(data_dir, "accounts"))
+    for path in list(paths):
+        expanded = os.path.expanduser(path)
+        if os.path.basename(expanded) != "auth.json":
             continue
-        if path not in paths:
-            paths.append(path)
+        parent = os.path.dirname(expanded)
+        grandparent = os.path.dirname(parent)
+        if os.path.basename(parent).startswith("acc") and grandparent:
+            roots.append(grandparent)
+
+    for root in roots:
+        if not root:
+            continue
+        for discovered in sorted(glob.glob(os.path.join(os.path.expanduser(root), "acc*/auth.json"))):
+            if discovered not in paths:
+                paths.append(discovered)
     return paths
 
 
