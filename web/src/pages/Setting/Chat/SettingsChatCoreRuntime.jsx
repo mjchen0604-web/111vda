@@ -84,55 +84,54 @@ const formatAccountStatus = (record) => {
   const unlockAt = String(record.unlock_at || '').trim();
 
   const parts = [];
-
-  const hasFastIssue =
-    (fastStatus && fastStatus !== 'running') ||
-    fastCooldownRemaining > 0 ||
-    (Number.isFinite(fastRequestFailures) && fastRequestFailures > 0) ||
-    Boolean(fastLastError);
+  const standardParts = [];
+  const fastParts = [];
 
   if (fastStatus) {
-    parts.push(
+    fastParts.push(
       fastListening ? `fast:${fastStatus}` : `fast:${fastStatus}(not-listening)`,
     );
   }
   if (fastCooldownRemaining > 0) {
-    parts.push(`fast cooldown ${fastCooldownRemaining}s`);
+    fastParts.push(`cooldown ${fastCooldownRemaining}s`);
   }
   if (fastUnlockAt) {
-    parts.push(`fast until ${fastUnlockAt}`);
+    fastParts.push(`until ${fastUnlockAt}`);
   }
   if (Number.isFinite(fastRequestFailures) && fastRequestFailures > 0) {
-    parts.push(`fast failures ${fastRequestFailures}`);
+    fastParts.push(`failures ${fastRequestFailures}`);
   }
   if (fastLastError) {
-    parts.push(fastLastError);
+    fastParts.push(fastLastError);
   }
 
-  if (!hasFastIssue) {
-    if (Number.isFinite(lastStatus) && lastStatus > 0) {
-      parts.push(`HTTP ${lastStatus}`);
-    } else if (status) {
-      parts.push(status);
-    }
-  } else if (Number.isFinite(lastStatus) && lastStatus > 0 && !fastLastError) {
-    parts.push(`HTTP ${lastStatus}`);
+  if (Number.isFinite(lastStatus) && lastStatus > 0) {
+    standardParts.push(`std:HTTP ${lastStatus}`);
+  } else if (status) {
+    standardParts.push(`std:${status}`);
   }
 
-  if (!hasFastIssue && lastClassification && lastClassification !== 'ready') {
-    parts.push(lastClassification);
+  if (lastClassification && lastClassification !== 'ready') {
+    standardParts.push(lastClassification);
   }
 
-  if (!hasFastIssue && cooldownRemaining > 0) {
-    parts.push(`cooldown ${cooldownRemaining}s`);
+  if (cooldownRemaining > 0) {
+    standardParts.push(`cooldown ${cooldownRemaining}s`);
   }
 
-  if (!hasFastIssue && unlockAt) {
-    parts.push(`until ${unlockAt}`);
+  if (unlockAt) {
+    standardParts.push(`until ${unlockAt}`);
   }
 
-  if (!hasFastIssue && lastError) {
-    parts.push(lastError);
+  if (lastError) {
+    standardParts.push(lastError);
+  }
+
+  if (fastParts.length > 0) {
+    parts.push(fastParts.join(' '));
+  }
+  if (standardParts.length > 0) {
+    parts.push(standardParts.join(' '));
   }
 
   return parts.length > 0 ? parts.join(' | ') : '-';

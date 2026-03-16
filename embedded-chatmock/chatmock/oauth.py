@@ -183,6 +183,11 @@ class OAuthHTTPServer(http.server.HTTPServer):
         return exchanged_access_token, success_url
 
     def persist_auth(self, bundle: AuthBundle) -> bool:
+        id_token_claims = parse_jwt_claims(bundle.token_data.id_token) or {}
+        access_token_claims = parse_jwt_claims(bundle.token_data.access_token) or {}
+        org_id = id_token_claims.get("organization_id") or access_token_claims.get("organization_id") or ""
+        project_id = id_token_claims.get("project_id") or access_token_claims.get("project_id") or ""
+        plan_type = access_token_claims.get("chatgpt_plan_type") or ""
         auth_json_contents = {
             "OPENAI_API_KEY": bundle.api_key,
             "tokens": {
@@ -191,6 +196,9 @@ class OAuthHTTPServer(http.server.HTTPServer):
                 "refresh_token": bundle.token_data.refresh_token,
                 "account_id": bundle.token_data.account_id,
             },
+            "org_id": org_id if isinstance(org_id, str) else "",
+            "project_id": project_id if isinstance(project_id, str) else "",
+            "plan_type": plan_type if isinstance(plan_type, str) else "",
             "last_refresh": bundle.last_refresh,
         }
         return write_auth_file(auth_json_contents)
@@ -239,6 +247,9 @@ class OAuthHandler(http.server.BaseHTTPRequestHandler):
                 "refresh_token": auth_bundle.token_data.refresh_token,
                 "account_id": auth_bundle.token_data.account_id,
             },
+            "org_id": params.get("org_id", [""])[0] or "",
+            "project_id": params.get("project_id", [""])[0] or "",
+            "plan_type": params.get("plan_type", [""])[0] or "",
             "last_refresh": auth_bundle.last_refresh,
         }
         if write_auth_file(auth_json_contents):

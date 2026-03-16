@@ -168,10 +168,8 @@ function renderAccounts(payload) {
               <div class="account-file">${acc.label || "-"}</div>
               <div class="account-mail">${acc.source || "-"}</div>
             </div>
-            <div class="account-file">status: ${
-              acc.fast_last_request_error || acc.fast_last_error || Number(acc.fast_cooldown_remaining || 0) > 0
-                ? `${acc.fast_status || "-"}`
-                : `${acc.fast_status || acc.status || "ready"} / ${acc.last_status ?? "-"}`
+            <div class="account-file">status: fast:${acc.fast_status || "-"} | std:${
+              acc.last_status ?? acc.status ?? "-"
             }</div>
           </div>
           <div class="account-meta">

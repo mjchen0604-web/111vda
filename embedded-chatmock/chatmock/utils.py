@@ -556,6 +556,47 @@ def _derive_account_id(id_token: Optional[str]) -> Optional[str]:
     return None
 
 
+def _derive_workspace_fields(
+    id_token: Optional[str],
+    access_token: Optional[str],
+    auth_obj: Optional[Dict[str, Any]] = None,
+) -> tuple[str, str]:
+    org_id = ""
+    project_id = ""
+    for token in (id_token, access_token):
+        claims = parse_jwt_claims(token) or {}
+        if not isinstance(claims, dict):
+            continue
+        if not org_id:
+            value = claims.get("organization_id")
+            if isinstance(value, str):
+                org_id = value.strip()
+        if not project_id:
+            value = claims.get("project_id")
+            if isinstance(value, str):
+                project_id = value.strip()
+        auth_claims = claims.get("https://api.openai.com/auth")
+        if isinstance(auth_claims, dict):
+            if not org_id:
+                value = auth_claims.get("organization_id")
+                if isinstance(value, str):
+                    org_id = value.strip()
+            if not project_id:
+                value = auth_claims.get("project_id")
+                if isinstance(value, str):
+                    project_id = value.strip()
+    if isinstance(auth_obj, dict):
+        if not org_id:
+            value = auth_obj.get("org_id")
+            if isinstance(value, str):
+                org_id = value.strip()
+        if not project_id:
+            value = auth_obj.get("project_id")
+            if isinstance(value, str):
+                project_id = value.strip()
+    return org_id, project_id
+
+
 def _parse_iso8601(value: str) -> Optional[datetime.datetime]:
     try:
         if value.endswith("Z"):
@@ -1345,25 +1386,7 @@ def _auth_record_from_obj(
     id_claims = parse_jwt_claims(id_token) or {}
     access_claims = parse_jwt_claims(access_token) or {}
     plan_raw = (access_claims.get("https://api.openai.com/auth") or {}).get("chatgpt_plan_type") or ""
-    org_id = ""
-    project_id = ""
-    for claims in (access_claims, id_claims):
-        if not org_id:
-            value = claims.get("organization_id")
-            if isinstance(value, str):
-                org_id = value.strip()
-        if not project_id:
-            value = claims.get("project_id")
-            if isinstance(value, str):
-                project_id = value.strip()
-    if not org_id:
-        value = auth_obj.get("org_id")
-        if isinstance(value, str):
-            org_id = value.strip()
-    if not project_id:
-        value = auth_obj.get("project_id")
-        if isinstance(value, str):
-            project_id = value.strip()
+    org_id, project_id = _derive_workspace_fields(id_token, access_token, auth_obj)
     workspace_display = " / ".join([part for part in (org_id, project_id) if part])
     return {
         "label": label,
