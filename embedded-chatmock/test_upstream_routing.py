@@ -14,10 +14,14 @@ from chatmock.upstream import normalize_model_name
 
 
 class UpstreamRoutingTests(unittest.TestCase):
-    def test_normalize_model_name_preserves_fast_and_effort_suffixes(self):
+    def test_normalize_model_name_strips_fast_and_effort_suffixes(self):
         self.assertEqual(
             normalize_model_name("gpt-5.4-fast-low"),
-            "gpt-5.4-fast-low",
+            "gpt-5.4",
+        )
+        self.assertEqual(
+            normalize_model_name("gpt-5-medium"),
+            "gpt-5",
         )
 
     def test_default_web_search_never_auto_enables(self):

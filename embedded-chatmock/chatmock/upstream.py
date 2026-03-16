@@ -48,7 +48,7 @@ def normalize_model_name(name: str | None, debug_model: str | None = None) -> st
         return debug_model.strip()
     if not isinstance(name, str) or not name.strip():
         return "gpt-5"
-    base, effort, service_tier = split_model_alias(name)
+    base, _, _ = split_model_alias(name)
     mapping = {
         "gpt5": "gpt-5",
         "gpt-5-latest": "gpt-5",
@@ -73,12 +73,7 @@ def normalize_model_name(name: str | None, debug_model: str | None = None) -> st
         "gpt-5.1-codex-max": "gpt-5.1-codex-max",
         "gpt-5.1-codex-mini": "gpt-5.1-codex-mini",
     }
-    normalized = mapping.get(base, base or "gpt-5")
-    if service_tier:
-        normalized = f"{normalized}-{service_tier}"
-    if effort:
-        normalized = f"{normalized}-{effort}"
-    return normalized
+    return mapping.get(base, base or "gpt-5")
 
 
 def _normalize_service_tier(service_tier: str | None) -> str | None:
