@@ -26,7 +26,12 @@ from .upstream_errors import (
 )
 from .upstream import normalize_model_name, resolve_upstream_mode, start_upstream_request
 from .thread_sessions import resolve_thread_session_state
-from .utils import restore_reserved_tool_name, sanitize_reserved_tool_name
+from .utils import (
+    extract_response_output_text,
+    merge_response_text,
+    restore_reserved_tool_name,
+    sanitize_reserved_tool_name,
+)
 
 
 anthropic_bp = Blueprint("anthropic", __name__)
@@ -391,6 +396,33 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
     next_block_index = 0
     text_open = False
     text_index = -1
+    emitted_output_text = ""
+
+    def _emit_text_delta(delta_text: str) -> str | None:
+        nonlocal text_open, text_index, next_block_index, emitted_output_text
+        if not isinstance(delta_text, str) or not delta_text:
+            return None
+        if not text_open:
+            text_index = next_block_index
+            next_block_index += 1
+            text_open = True
+            yield _emit(
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": text_index,
+                    "content_block": {"type": "text", "text": ""},
+                },
+            )
+        emitted_output_text += delta_text
+        yield _emit(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": text_index,
+                "delta": {"type": "text_delta", "text": delta_text},
+            },
+        )
     try:
         yield _emit(
             "message_start",
@@ -436,32 +468,42 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
             if kind == "response.output_text.delta":
                 delta = evt.get("delta") or ""
                 if isinstance(delta, str) and delta:
-                    if not text_open:
-                        text_index = next_block_index
-                        next_block_index += 1
-                        text_open = True
-                        yield _emit(
-                            "content_block_start",
-                            {
-                                "type": "content_block_start",
-                                "index": text_index,
-                                "content_block": {"type": "text", "text": ""},
-                            },
-                        )
-                    yield _emit(
-                        "content_block_delta",
-                        {
-                            "type": "content_block_delta",
-                            "index": text_index,
-                            "delta": {"type": "text_delta", "text": delta},
-                        },
-                    )
+                    for chunk in _emit_text_delta(delta):
+                        yield chunk
+                continue
+
+            if kind == "response.output_text.done":
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    evt.get("text") or "",
+                )
+                if missing_delta:
+                    for chunk in _emit_text_delta(missing_delta):
+                        yield chunk
+                continue
+
+            if kind == "response.content_part.done":
+                part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    part.get("text") or "",
+                )
+                if missing_delta:
+                    for chunk in _emit_text_delta(missing_delta):
+                        yield chunk
                 continue
 
             if kind == "response.output_item.done":
                 item = evt.get("item") if isinstance(evt.get("item"), dict) else {}
                 tool_payload = _tool_use_payload_from_item(item)
                 if tool_payload is None:
+                    emitted_output_text, missing_delta = merge_response_text(
+                        emitted_output_text,
+                        extract_response_output_text(item),
+                    )
+                    if missing_delta:
+                        for chunk in _emit_text_delta(missing_delta):
+                            yield chunk
                     continue
                 if text_open:
                     yield _emit("content_block_stop", {"type": "content_block_stop", "index": text_index})
@@ -501,6 +543,13 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                 return
 
             if kind == "response.completed":
+                emitted_output_text, missing_delta = merge_response_text(
+                    emitted_output_text,
+                    extract_response_output_text(evt.get("response")),
+                )
+                if missing_delta:
+                    for chunk in _emit_text_delta(missing_delta):
+                        yield chunk
                 break
 
         if text_open:
@@ -677,11 +726,21 @@ def messages() -> Response:
             kind = evt.get("type")
             if kind == "response.output_text.delta":
                 full_text += evt.get("delta") or ""
+            elif kind == "response.output_text.done":
+                full_text, _ = merge_response_text(full_text, evt.get("text") or "")
+            elif kind == "response.content_part.done":
+                part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
+                full_text, _ = merge_response_text(full_text, part.get("text") or "")
             elif kind == "response.output_item.done":
                 item = evt.get("item") if isinstance(evt.get("item"), dict) else {}
                 tool_payload = _tool_use_payload_from_item(item)
                 if tool_payload is not None:
                     tool_calls.append(tool_payload)
+                else:
+                    full_text, _ = merge_response_text(
+                        full_text,
+                        extract_response_output_text(item),
+                    )
             elif kind == "response.failed":
                 error_info = error_info_from_event_response(
                     getattr(upstream, "chatmock_source", "upstream"),
@@ -690,6 +749,10 @@ def messages() -> Response:
                 )
                 error_message = error_info.get("raw_message") or "response.failed"
             elif kind == "response.completed":
+                full_text, _ = merge_response_text(
+                    full_text,
+                    extract_response_output_text(evt.get("response")),
+                )
                 completed_ok = True
                 break
     finally:
