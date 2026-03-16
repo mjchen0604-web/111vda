@@ -172,6 +172,7 @@ function renderAccounts(payload) {
           </div>
           <div class="account-meta">
             <div>account: ${acc.account_id || "-"}</div>
+            <div>workspace: ${acc.workspace_display || acc.project_id || acc.org_id || "-"}</div>
             <div>refresh: ${acc.last_refresh || "-"}</div>
             <div>failures: ${acc.failures || 0}</div>
             <div>cooldown: ${acc.cooldown_remaining || 0}s</div>

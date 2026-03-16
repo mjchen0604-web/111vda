@@ -1343,10 +1343,33 @@ def _auth_record_from_obj(
     id_claims = parse_jwt_claims(id_token) or {}
     access_claims = parse_jwt_claims(access_token) or {}
     plan_raw = (access_claims.get("https://api.openai.com/auth") or {}).get("chatgpt_plan_type") or ""
+    org_id = ""
+    project_id = ""
+    for claims in (access_claims, id_claims):
+        if not org_id:
+            value = claims.get("organization_id")
+            if isinstance(value, str):
+                org_id = value.strip()
+        if not project_id:
+            value = claims.get("project_id")
+            if isinstance(value, str):
+                project_id = value.strip()
+    if not org_id:
+        value = auth_obj.get("org_id")
+        if isinstance(value, str):
+            org_id = value.strip()
+    if not project_id:
+        value = auth_obj.get("project_id")
+        if isinstance(value, str):
+            project_id = value.strip()
+    workspace_display = " / ".join([part for part in (org_id, project_id) if part])
     return {
         "label": label,
         "source": source,
         "account_id": _compact_account_id(account_id),
+        "org_id": org_id,
+        "project_id": project_id,
+        "workspace_display": workspace_display,
         "email": id_claims.get("email") or id_claims.get("preferred_username") or "",
         "plan": str(plan_raw).lower() if isinstance(plan_raw, str) else "",
         "last_refresh": last_refresh if isinstance(last_refresh, str) else "",

@@ -131,6 +131,15 @@ export default function SettingsChatCoreRuntime() {
         render: (_, record) => safeText(record.account_id),
       },
       {
+        title: '空间 / Workspace',
+        dataIndex: 'workspace_display',
+        render: (_, record) =>
+          safeText(
+            record.workspace_display ||
+              [record.org_id, record.project_id].filter(Boolean).join(' / '),
+          ),
+      },
+      {
         title: '状态',
         dataIndex: 'last_status',
         render: (_, record) => formatAccountStatus(record),

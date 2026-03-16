@@ -308,42 +308,33 @@ def ollama_chat() -> Response:
         stream_req = True
     stream_req = bool(stream_req)
     tools_req = payload.get("tools") if isinstance(payload.get("tools"), list) else []
+    if any(
+        isinstance(_t, dict) and _t.get("type") in ("web_search", "web_search_preview")
+        for _t in tools_req
+    ):
+        err = {"error": "Built-in web_search is only supported on /v1/responses"}
+        if verbose:
+            _log_json("OUT POST /api/chat", err)
+        return jsonify(err), 400
     tools_responses = convert_tools_chat_to_responses(normalize_ollama_tools(tools_req))
     tool_choice = payload.get("tool_choice", "auto")
     parallel_tool_calls = bool(payload.get("parallel_tool_calls", False))
 
     # Passthrough Responses API tools (web_search) via ChatMock extension fields
-    extra_tools: List[Dict[str, Any]] = []
     had_responses_tools = False
     rt_payload = payload.get("responses_tools") if isinstance(payload.get("responses_tools"), list) else []
-    if isinstance(rt_payload, list):
-        for _t in rt_payload:
-            if not (isinstance(_t, dict) and isinstance(_t.get("type"), str)):
-                continue
-            if _t.get("type") not in ("web_search", "web_search_preview"):
-                err = {"error": "Only web_search/web_search_preview are supported in responses_tools"}
-                if verbose:
-                    _log_json("OUT POST /api/chat", err)
-                return jsonify(err), 400
-            extra_tools.append(_t)
-        if extra_tools:
-            import json as _json
-            MAX_TOOLS_BYTES = 32768
-            try:
-                size = len(_json.dumps(extra_tools))
-            except Exception:
-                size = 0
-            if size > MAX_TOOLS_BYTES:
-                err = {"error": "responses_tools too large"}
-                if verbose:
-                    _log_json("OUT POST /api/chat", err)
-                return jsonify(err), 400
-            had_responses_tools = True
-            tools_responses = (tools_responses or []) + extra_tools
+    if rt_payload:
+        err = {"error": "responses_tools is only supported on /v1/responses"}
+        if verbose:
+            _log_json("OUT POST /api/chat", err)
+        return jsonify(err), 400
 
     rtc = payload.get("responses_tool_choice")
-    if isinstance(rtc, str) and rtc in ("auto", "none"):
-        tool_choice = rtc
+    if isinstance(rtc, str) and rtc.strip():
+        err = {"error": "responses_tool_choice is only supported on /v1/responses"}
+        if verbose:
+            _log_json("OUT POST /api/chat", err)
+        return jsonify(err), 400
 
     if not isinstance(model, str) or not isinstance(messages, list) or not messages:
         err = {"error": "Invalid request format"}
