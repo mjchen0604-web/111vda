@@ -326,12 +326,7 @@ def ollama_chat() -> Response:
                     _log_json("OUT POST /api/chat", err)
                 return jsonify(err), 400
             extra_tools.append(_t)
-        if (
-            not extra_tools
-            and not tools_payload
-            and not rt_payload
-            and bool(current_app.config.get("DEFAULT_WEB_SEARCH"))
-        ):
+        if not extra_tools and bool(current_app.config.get("DEFAULT_WEB_SEARCH")):
             rtc = payload.get("responses_tool_choice")
             if not (isinstance(rtc, str) and rtc == "none"):
                 extra_tools = [{"type": "web_search"}]
