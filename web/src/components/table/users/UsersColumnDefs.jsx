@@ -20,20 +20,18 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Button,
+  Dropdown,
+  Modal,
+  Popover,
+  Progress,
   Space,
   Tag,
   Tooltip,
-  Progress,
-  Popover,
   Typography,
-  Dropdown,
 } from '@douyinfe/semi-ui';
 import { IconMore } from '@douyinfe/semi-icons';
 import { renderGroup, renderNumber, renderQuota } from '../../../helpers';
 
-/**
- * Render user role
- */
 const renderRole = (role, t) => {
   switch (role) {
     case 1:
@@ -63,9 +61,6 @@ const renderRole = (role, t) => {
   }
 };
 
-/**
- * Render username with remark
- */
 const renderUsername = (text, record) => {
   const remark = record.remark;
   if (!remark) {
@@ -92,13 +87,8 @@ const renderUsername = (text, record) => {
   );
 };
 
-/**
- * Render user statistics
- */
-const renderStatistics = (text, record, showEnableDisableModal, t) => {
+const renderStatistics = (text, record, t) => {
   const isDeleted = record.DeletedAt !== null;
-
-  // Determine tag text & color like original status column
   let tagColor = 'grey';
   let tagText = t('未知状态');
   if (isDeleted) {
@@ -112,28 +102,24 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
     tagText = t('已禁用');
   }
 
-  const content = (
-    <Tag color={tagColor} shape='circle' size='small'>
-      {tagText}
-    </Tag>
-  );
-
-  const tooltipContent = (
-    <div className='text-xs'>
-      <div>
-        {t('调用次数')}: {renderNumber(record.request_count)}
-      </div>
-    </div>
-  );
-
   return (
-    <Tooltip content={tooltipContent} position='top'>
-      {content}
+    <Tooltip
+      content={
+        <div className='text-xs'>
+          <div>
+            {t('调用次数')}: {renderNumber(record.request_count)}
+          </div>
+        </div>
+      }
+      position='top'
+    >
+      <Tag color={tagColor} shape='circle' size='small'>
+        {tagText}
+      </Tag>
     </Tooltip>
   );
 };
 
-// Render separate quota usage column
 const renderQuotaUsage = (text, record, t) => {
   const { Paragraph } = Typography;
   const used = parseInt(record.used_quota) || 0;
@@ -157,7 +143,9 @@ const renderQuotaUsage = (text, record, t) => {
     <Popover content={popoverContent} position='top'>
       <Tag color='white' shape='circle'>
         <div className='flex flex-col items-end'>
-          <span className='text-xs leading-none'>{`${renderQuota(remain)} / ${renderQuota(total)}`}</span>
+          <span className='text-xs leading-none'>
+            {`${renderQuota(remain)} / ${renderQuota(total)}`}
+          </span>
           <Progress
             percent={percent}
             aria-label='quota usage'
@@ -170,32 +158,24 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
-/**
- * Render invite information
- */
-const renderInviteInfo = (text, record, t) => {
-  return (
-    <div>
-      <Space spacing={1}>
-        <Tag color='white' shape='circle' className='!text-xs'>
-          {t('邀请')}: {renderNumber(record.aff_count)}
-        </Tag>
-        <Tag color='white' shape='circle' className='!text-xs'>
-          {t('收益')}: {renderQuota(record.aff_history_quota)}
-        </Tag>
-        <Tag color='white' shape='circle' className='!text-xs'>
-          {record.inviter_id === 0
-            ? t('无邀请人')
-            : `${t('邀请人')}: ${record.inviter_id}`}
-        </Tag>
-      </Space>
-    </div>
-  );
-};
+const renderInviteInfo = (text, record, t) => (
+  <div>
+    <Space spacing={1}>
+      <Tag color='white' shape='circle' className='!text-xs'>
+        {t('邀请')}: {renderNumber(record.aff_count)}
+      </Tag>
+      <Tag color='white' shape='circle' className='!text-xs'>
+        {t('收益')}: {renderQuota(record.aff_history_quota)}
+      </Tag>
+      <Tag color='white' shape='circle' className='!text-xs'>
+        {record.inviter_id === 0
+          ? t('无邀请人')
+          : `${t('邀请人')}: ${record.inviter_id}`}
+      </Tag>
+    </Space>
+  </div>
+);
 
-/**
- * Render operations column
- */
 const renderOperations = (
   text,
   record,
@@ -209,11 +189,30 @@ const renderOperations = (
     showResetPasskeyModal,
     showResetTwoFAModal,
     showUserSubscriptionsModal,
+    hardDeleteUser,
     t,
   },
 ) => {
   if (record.DeletedAt !== null) {
-    return <></>;
+    return (
+      <Space>
+        <Button
+          type='danger'
+          size='small'
+          onClick={() =>
+            Modal.confirm({
+              title: t('确认删除'),
+              content: '删除后将彻底移除该用户账号记录，无法恢复。是否继续？',
+              centered: true,
+              okType: 'danger',
+              onOk: () => hardDeleteUser(record),
+            })
+          }
+        >
+          {t('删除')}
+        </Button>
+      </Space>
+    );
   }
 
   const moreMenu = [
@@ -293,7 +292,7 @@ const renderOperations = (
         size='small'
         onClick={() => showDeleteModal(record)}
       >
-        {t('娉ㄩ攢')}
+        {t('注销')}
       </Button>
       <Dropdown menu={moreMenu} trigger='click' position='bottomRight'>
         <Button type='tertiary' size='small' icon={<IconMore />} />
@@ -302,9 +301,6 @@ const renderOperations = (
   );
 };
 
-/**
- * Get users table column definitions
- */
 export const getUsersColumns = ({
   t,
   setEditingUser,
@@ -316,65 +312,61 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserSubscriptionsModal,
-}) => {
-  return [
-    {
-      title: 'ID',
-      dataIndex: 'id',
-    },
-    {
-      title: t('用户名'),
-      dataIndex: 'username',
-      render: (text, record) => renderUsername(text, record),
-    },
-    {
-      title: t('状态'),
-      dataIndex: 'info',
-      render: (text, record, index) =>
-        renderStatistics(text, record, showEnableDisableModal, t),
-    },
-    {
-      title: t('剩余额度/总额度'),
-      key: 'quota_usage',
-      render: (text, record) => renderQuotaUsage(text, record, t),
-    },
-    {
-      title: t('分组'),
-      dataIndex: 'group',
-      render: (text, record, index) => {
-        return <div>{renderGroup(text)}</div>;
-      },
-    },
-    {
-      title: t('角色'),
-      dataIndex: 'role',
-      render: (text, record, index) => {
-        return <div>{renderRole(text, t)}</div>;
-      },
-    },
-    {
-      title: t('邀请信息'),
-      dataIndex: 'invite',
-      render: (text, record, index) => renderInviteInfo(text, record, t),
-    },
-    {
-      title: '',
-      dataIndex: 'operate',
-      fixed: 'right',
-      width: 200,
-      render: (text, record, index) =>
-        renderOperations(text, record, {
-          setEditingUser,
-          setShowEditUser,
-          showPromoteModal,
-          showDemoteModal,
-          showEnableDisableModal,
-          showDeleteModal,
-          showResetPasskeyModal,
-          showResetTwoFAModal,
-          showUserSubscriptionsModal,
-          t,
-        }),
-    },
-  ];
-};
+  hardDeleteUser,
+}) => [
+  {
+    title: 'ID',
+    dataIndex: 'id',
+  },
+  {
+    title: t('用户名'),
+    dataIndex: 'username',
+    render: (text, record) => renderUsername(text, record),
+  },
+  {
+    title: t('状态'),
+    dataIndex: 'info',
+    render: (text, record) => renderStatistics(text, record, t),
+  },
+  {
+    title: t('剩余额度/总额度'),
+    key: 'quota_usage',
+    render: (text, record) => renderQuotaUsage(text, record, t),
+  },
+  {
+    title: t('分组'),
+    dataIndex: 'group',
+    render: (text) => <div>{renderGroup(text)}</div>,
+  },
+  {
+    title: t('角色'),
+    dataIndex: 'role',
+    render: (text) => <div>{renderRole(text, t)}</div>,
+  },
+  {
+    title: t('邀请信息'),
+    dataIndex: 'invite',
+    render: (text, record) => renderInviteInfo(text, record, t),
+  },
+  {
+    title: '',
+    dataIndex: 'operate',
+    fixed: 'right',
+    width: 260,
+    render: (text, record) =>
+      renderOperations(text, record, {
+        setEditingUser,
+        setShowEditUser,
+        showPromoteModal,
+        showDemoteModal,
+        showEnableDisableModal,
+        showDeleteModal,
+        showResetPasskeyModal,
+        showResetTwoFAModal,
+        showUserSubscriptionsModal,
+        hardDeleteUser,
+        t,
+      }),
+  },
+];
+

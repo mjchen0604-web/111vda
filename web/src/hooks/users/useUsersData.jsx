@@ -188,6 +188,24 @@ export const useUsersData = () => {
     }
   };
 
+  const hardDeleteUser = async (user) => {
+    if (!user?.id) {
+      return;
+    }
+    try {
+      const res = await API.delete(`/api/user/${user.id}`);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('删除成功'));
+        await refresh();
+      } else {
+        showError(message || t('删除失败'));
+      }
+    } catch (error) {
+      showError(t('操作失败，请重试'));
+    }
+  };
+
   // Handle page change
   const handlePageChange = (page) => {
     setActivePage(page);
@@ -305,6 +323,7 @@ export const useUsersData = () => {
     loadUsers,
     searchUsers,
     manageUser,
+    hardDeleteUser,
     resetUserPasskey,
     resetUserTwoFA,
     handlePageChange,
