@@ -85,6 +85,12 @@ const formatAccountStatus = (record) => {
 
   const parts = [];
 
+  const hasFastIssue =
+    (fastStatus && fastStatus !== 'running') ||
+    fastCooldownRemaining > 0 ||
+    (Number.isFinite(fastRequestFailures) && fastRequestFailures > 0) ||
+    Boolean(fastLastError);
+
   if (fastStatus) {
     parts.push(
       fastListening ? `fast:${fastStatus}` : `fast:${fastStatus}(not-listening)`,
@@ -103,25 +109,29 @@ const formatAccountStatus = (record) => {
     parts.push(fastLastError);
   }
 
-  if (Number.isFinite(lastStatus) && lastStatus > 0) {
+  if (!hasFastIssue) {
+    if (Number.isFinite(lastStatus) && lastStatus > 0) {
+      parts.push(`HTTP ${lastStatus}`);
+    } else if (status) {
+      parts.push(status);
+    }
+  } else if (Number.isFinite(lastStatus) && lastStatus > 0 && !fastLastError) {
     parts.push(`HTTP ${lastStatus}`);
-  } else if (status) {
-    parts.push(status);
   }
 
-  if (lastClassification && lastClassification !== 'ready') {
+  if (!hasFastIssue && lastClassification && lastClassification !== 'ready') {
     parts.push(lastClassification);
   }
 
-  if (cooldownRemaining > 0) {
+  if (!hasFastIssue && cooldownRemaining > 0) {
     parts.push(`cooldown ${cooldownRemaining}s`);
   }
 
-  if (unlockAt) {
+  if (!hasFastIssue && unlockAt) {
     parts.push(`until ${unlockAt}`);
   }
 
-  if (lastError) {
+  if (!hasFastIssue && lastError) {
     parts.push(lastError);
   }
 
