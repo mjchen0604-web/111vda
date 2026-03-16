@@ -596,6 +596,13 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response.created"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
 	}
+	if outputText.Len() == 0 && len(toolCalls) == 0 {
+		return nil, types.NewOpenAIError(
+			fmt.Errorf("stream ended before any response output was emitted"),
+			types.ErrorCodeBadResponse,
+			http.StatusBadGateway,
+		)
+	}
 
 	if outputText.Len() > 0 {
 		text := outputText.String()

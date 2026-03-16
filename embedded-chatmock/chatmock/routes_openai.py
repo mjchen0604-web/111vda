@@ -354,6 +354,18 @@ def _consume_chat_completion_nonstream(
             )
         return {"ok": False, "error_info": error_info}
 
+    if not completed_ok and not full_text and not tool_calls:
+        return {
+            "ok": False,
+            "error_info": build_error_info(
+                source=getattr(upstream, "chatmock_source", "upstream"),
+                phase="stream",
+                raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                raw_message="stream ended before response.completed",
+                raw_body={"message": "stream ended before response.completed"},
+            ),
+        }
+
     if tool_calls:
         message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
     else:
