@@ -1138,6 +1138,36 @@ export function convertUSDToCurrency(usdAmount, digits = 2) {
   return symbol + convertedAmount.toFixed(digits);
 }
 
+export function convertMoneyAmountToDisplay(
+  amount,
+  sourceCurrency = 'USD',
+  digits = 2,
+) {
+  const numericAmount = Number(amount || 0);
+  const normalizedSource = String(sourceCurrency || 'USD').toUpperCase();
+  const { symbol, rate, type } = getCurrencyConfig();
+
+  let usdAmount = numericAmount;
+  if (normalizedSource === 'CNY') {
+    const statusStr = localStorage.getItem('status');
+    let usdRate = 1;
+    try {
+      if (statusStr) {
+        const s = JSON.parse(statusStr);
+        usdRate = s?.usd_exchange_rate || 1;
+      }
+    } catch (e) {}
+    usdAmount = usdRate > 0 ? numericAmount / usdRate : numericAmount;
+  }
+
+  if (type === 'USD' || type === 'TOKENS') {
+    return '$' + usdAmount.toFixed(digits);
+  }
+
+  const convertedAmount = usdAmount * rate;
+  return symbol + convertedAmount.toFixed(digits);
+}
+
 export function renderQuota(quota, digits = 2) {
   let quotaPerUnit = localStorage.getItem('quota_per_unit');
   const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';

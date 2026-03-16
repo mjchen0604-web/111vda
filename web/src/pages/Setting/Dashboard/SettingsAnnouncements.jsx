@@ -45,6 +45,7 @@ import {
   formatDateTimeString,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import NoticeImageUploader from '../../../components/settings/NoticeImageUploader';
 
 const { Text } = Typography;
 
@@ -312,6 +313,14 @@ const SettingsAnnouncements = ({ options, refresh }) => {
     }
   };
 
+  const handleInsertAnnouncementImage = (markdown) => {
+    const nextContent = announcementForm.content
+      ? `${announcementForm.content}\n\n${markdown}`
+      : markdown;
+    setAnnouncementForm((prev) => ({ ...prev, content: nextContent }));
+    formApiRef.current?.setValue('content', nextContent);
+  };
+
   const parseAnnouncements = (announcementsStr) => {
     if (!announcementsStr) {
       setAnnouncementsList([]);
@@ -532,6 +541,10 @@ const SettingsAnnouncements = ({ options, refresh }) => {
           key={editingAnnouncement ? editingAnnouncement.id : 'new'}
           getFormApi={(api) => (formApiRef.current = api)}
         >
+          <NoticeImageUploader
+            t={t}
+            onInsert={handleInsertAnnouncementImage}
+          />
           <Form.TextArea
             field='content'
             label={t('公告内容')}

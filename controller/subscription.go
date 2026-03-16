@@ -107,6 +107,15 @@ type AdminUpsertSubscriptionPlanRequest struct {
 	Plan model.SubscriptionPlan `json:"plan"`
 }
 
+func normalizeSubscriptionPlanCurrency(currency string) string {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "CNY":
+		return "CNY"
+	default:
+		return "USD"
+	}
+}
+
 func AdminCreateSubscriptionPlan(c *gin.Context) {
 	var req AdminUpsertSubscriptionPlanRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -129,7 +138,7 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if req.Plan.Currency == "" {
 		req.Plan.Currency = "USD"
 	}
-	req.Plan.Currency = "USD"
+	req.Plan.Currency = normalizeSubscriptionPlanCurrency(req.Plan.Currency)
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -192,7 +201,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	if req.Plan.Currency == "" {
 		req.Plan.Currency = "USD"
 	}
-	req.Plan.Currency = "USD"
+	req.Plan.Currency = normalizeSubscriptionPlanCurrency(req.Plan.Currency)
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}

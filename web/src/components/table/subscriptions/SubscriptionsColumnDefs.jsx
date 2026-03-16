@@ -30,7 +30,7 @@ import {
   Tooltip,
 } from '@douyinfe/semi-ui';
 import { renderQuota } from '../../../helpers';
-import { convertUSDToCurrency } from '../../../helpers/render';
+import { convertMoneyAmountToDisplay } from '../../../helpers/render';
 
 const { Text } = Typography;
 
@@ -79,7 +79,11 @@ const renderPlanTitle = (text, record, t) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <Text type='tertiary'>{t('价格')}</Text>
         <Text strong style={{ color: 'var(--semi-color-success)' }}>
-          {convertUSDToCurrency(Number(plan?.price_amount || 0), 2)}
+          {convertMoneyAmountToDisplay(
+            Number(plan?.price_amount || 0),
+            plan?.currency || 'USD',
+            2,
+          )}
         </Text>
         <Text type='tertiary'>{t('总额度')}</Text>
         {plan?.total_amount > 0 ? (
@@ -125,10 +129,14 @@ const renderPlanTitle = (text, record, t) => {
   );
 };
 
-const renderPrice = (text) => {
+const renderPrice = (text, record) => {
   return (
     <Text strong style={{ color: 'var(--semi-color-success)' }}>
-      {convertUSDToCurrency(Number(text || 0), 2)}
+      {convertMoneyAmountToDisplay(
+        Number(text || 0),
+        record?.plan?.currency || 'USD',
+        2,
+      )}
     </Text>
   );
 };
@@ -300,7 +308,7 @@ export const getSubscriptionsColumns = ({
       title: t('价格'),
       dataIndex: ['plan', 'price_amount'],
       width: 100,
-      render: (text) => renderPrice(text),
+      render: (text, record) => renderPrice(text, record),
     },
     {
       title: t('购买上限'),
