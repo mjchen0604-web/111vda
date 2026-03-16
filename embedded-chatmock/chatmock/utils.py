@@ -16,6 +16,7 @@ import requests
 
 from .config import CLIENT_ID_DEFAULT, OAUTH_TOKEN_URL
 from .upstream_errors import (
+    build_error_info,
     classify_error,
     error_info_from_event_response,
     extract_retry_after_unlock_ts,
@@ -1921,6 +1922,60 @@ def sse_translate_chat(
                         pass
                 yield b"data: [DONE]\n\n"
                 break
+        if not saw_completed:
+            error_info = normalized_error_payload(
+                build_error_info(
+                    source=getattr(upstream, "chatmock_source", "upstream"),
+                    phase="stream",
+                    raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                    raw_message="stream ended before response.completed",
+                    raw_body={"message": "stream ended before response.completed"},
+                )
+            )
+            if not has_visible_output and not sent_tool_finish:
+                if should_retry_next_candidate(error_info):
+                    raise RetryableStreamError(error_info)
+                chunk = {"error": error_info}
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            if not sent_stop_chunk:
+                chunk = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+        if not saw_completed:
+            error_info = normalized_error_payload(
+                build_error_info(
+                    source=getattr(upstream, "chatmock_source", "upstream"),
+                    phase="stream",
+                    raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                    raw_message="stream ended before response.completed",
+                    raw_body={"message": "stream ended before response.completed"},
+                )
+            )
+            if not has_visible_output and not sent_tool_finish:
+                if should_retry_next_candidate(error_info):
+                    raise RetryableStreamError(error_info)
+                chunk = {"error": error_info}
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            if not sent_stop_chunk:
+                chunk = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
     finally:
         upstream.close()
 
@@ -2109,6 +2164,60 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
                 "choices": [{"index": 0, "text": "", "finish_reason": "stop"}],
             }
             yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+        if not saw_completed:
+            error_info = normalized_error_payload(
+                build_error_info(
+                    source=getattr(upstream, "chatmock_source", "upstream"),
+                    phase="stream",
+                    raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                    raw_message="stream ended before response.completed",
+                    raw_body={"message": "stream ended before response.completed"},
+                )
+            )
+            if not has_visible_output and not sent_tool_finish:
+                if should_retry_next_candidate(error_info):
+                    raise RetryableStreamError(error_info)
+                chunk = {"error": error_info}
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            if not sent_stop_chunk:
+                chunk = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+        if not saw_completed:
+            error_info = normalized_error_payload(
+                build_error_info(
+                    source=getattr(upstream, "chatmock_source", "upstream"),
+                    phase="stream",
+                    raw_status=int(getattr(upstream, "status_code", 502) or 502),
+                    raw_message="stream ended before response.completed",
+                    raw_body={"message": "stream ended before response.completed"},
+                )
+            )
+            if not has_visible_output and not sent_tool_finish:
+                if should_retry_next_candidate(error_info):
+                    raise RetryableStreamError(error_info)
+                chunk = {"error": error_info}
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            if not sent_stop_chunk:
+                chunk = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
             yield b"data: [DONE]\n\n"
     finally:
         upstream.close()

@@ -137,6 +137,25 @@ class ResponseEventParsingTests(unittest.TestCase):
         ]
         self.assertIn("Only done text", "".join(content_deltas))
 
+    def test_stream_without_completed_and_without_text_returns_error(self):
+        upstream = DummyUpstream([])
+        chunks = list(
+            sse_translate_chat(
+                upstream,
+                "gpt-5.4",
+                0,
+                reasoning_compat="think-tags",
+            )
+        )
+        payloads = []
+        for chunk in chunks:
+            text = chunk.decode("utf-8")
+            if not text.startswith("data: ") or "[DONE]" in text:
+                continue
+            payloads.append(json.loads(text[len("data: ") :].strip()))
+
+        self.assertTrue(any("error" in entry for entry in payloads))
+
 
 if __name__ == "__main__":
     unittest.main()
