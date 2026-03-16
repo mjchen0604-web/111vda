@@ -1388,6 +1388,9 @@ def _auth_record_from_obj(
     plan_raw = (access_claims.get("https://api.openai.com/auth") or {}).get("chatgpt_plan_type") or ""
     org_id, project_id = _derive_workspace_fields(id_token, access_token, auth_obj)
     workspace_display = " / ".join([part for part in (org_id, project_id) if part])
+    if not workspace_display:
+        source_parent = os.path.basename(os.path.dirname(source)) if isinstance(source, str) and source else ""
+        workspace_display = source_parent or label or "-"
     return {
         "label": label,
         "source": source,
