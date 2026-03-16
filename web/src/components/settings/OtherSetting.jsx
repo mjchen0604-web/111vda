@@ -33,7 +33,7 @@ import { marked } from 'marked';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../context/Status';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
-import NoticeImageUploader from './NoticeImageUploader';
+import NoticeContentEditor from './NoticeContentEditor';
 
 const LEGAL_USER_AGREEMENT_KEY = 'legal.user_agreement';
 const LEGAL_PRIVACY_POLICY_KEY = 'legal.privacy_policy';
@@ -103,12 +103,6 @@ const OtherSetting = () => {
     } finally {
       setLoadingInput((loadingInput) => ({ ...loadingInput, Notice: false }));
     }
-  };
-
-  const handleInsertNoticeImage = (markdown) => {
-    const nextNotice = inputs.Notice ? `${inputs.Notice}\n\n${markdown}` : markdown;
-    setInputs((prev) => ({ ...prev, Notice: nextNotice }));
-    formAPISettingGeneral.current?.setValue('Notice', nextNotice);
   };
   // 通用设置 - UserAgreement
   const submitUserAgreement = async () => {
@@ -369,16 +363,16 @@ const OtherSetting = () => {
         >
           <Card>
             <Form.Section text={t('通用设置')}>
-              <NoticeImageUploader t={t} onInsert={handleInsertNoticeImage} />
-              <Form.TextArea
-                label={t('公告')}
-                placeholder={t(
-                  '在此输入新的公告内容，支持 Markdown & HTML 代码',
-                )}
-                field={'Notice'}
-                onChange={handleInputChange}
-                style={{ fontFamily: 'JetBrains Mono, Consolas' }}
-                autosize={{ minRows: 6, maxRows: 12 }}
+              <NoticeContentEditor
+                t={t}
+                value={inputs.Notice}
+                placeholder={t('在此输入新的公告内容，支持 Markdown 和 HTML 代码')}
+                previewTitle={t('首页公告预览')}
+                rows={12}
+                onChange={(value) => {
+                  setInputs((prev) => ({ ...prev, Notice: value }));
+                  formAPISettingGeneral.current?.setValue('Notice', value);
+                }}
               />
               <Button onClick={submitNotice} loading={loadingInput['Notice']}>
                 {t('设置公告')}

@@ -33,6 +33,7 @@ import { SiStripe } from 'react-icons/si';
 import { IconCreditCard } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
 import { convertMoneyAmountToDisplay } from '../../../helpers/render';
+import { quotaToCurrencyAmount } from '../../../helpers/quota';
 import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
@@ -59,6 +60,7 @@ const SubscriptionPurchaseModal = ({
 }) => {
   const plan = selectedPlan?.plan;
   const totalAmount = Number(plan?.total_amount || 0);
+  const totalAmountCurrency = plan?.total_amount_currency || 'USD';
   const price = plan ? Number(plan.price_amount || 0) : 0;
   const displayPrice = convertMoneyAmountToDisplay(
     price,
@@ -136,7 +138,11 @@ const SubscriptionPurchaseModal = ({
                   {totalAmount > 0 ? (
                     <Tooltip content={`${t('原生额度')}：${totalAmount}`}>
                       <Text className='text-slate-900 dark:text-slate-100'>
-                        {renderQuota(totalAmount)}
+                        {convertMoneyAmountToDisplay(
+                          quotaToCurrencyAmount(totalAmount, totalAmountCurrency),
+                          totalAmountCurrency,
+                          2,
+                        )}
                       </Text>
                     </Tooltip>
                   ) : (

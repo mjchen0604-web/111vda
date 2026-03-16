@@ -139,6 +139,10 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		req.Plan.Currency = "USD"
 	}
 	req.Plan.Currency = normalizeSubscriptionPlanCurrency(req.Plan.Currency)
+	if req.Plan.TotalAmountCurrency == "" {
+		req.Plan.TotalAmountCurrency = "USD"
+	}
+	req.Plan.TotalAmountCurrency = normalizeSubscriptionPlanCurrency(req.Plan.TotalAmountCurrency)
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -202,6 +206,10 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		req.Plan.Currency = "USD"
 	}
 	req.Plan.Currency = normalizeSubscriptionPlanCurrency(req.Plan.Currency)
+	if req.Plan.TotalAmountCurrency == "" {
+		req.Plan.TotalAmountCurrency = "USD"
+	}
+	req.Plan.TotalAmountCurrency = normalizeSubscriptionPlanCurrency(req.Plan.TotalAmountCurrency)
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -236,6 +244,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"subtitle":                   req.Plan.Subtitle,
 			"price_amount":               req.Plan.PriceAmount,
 			"currency":                   req.Plan.Currency,
+			"total_amount_currency":      req.Plan.TotalAmountCurrency,
 			"duration_unit":              req.Plan.DurationUnit,
 			"duration_value":             req.Plan.DurationValue,
 			"custom_seconds":             req.Plan.CustomSeconds,

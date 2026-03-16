@@ -32,6 +32,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
 import { convertMoneyAmountToDisplay } from '../../helpers/render';
+import { quotaToCurrencyAmount } from '../../helpers/quota';
 import { RefreshCw, Sparkles } from 'lucide-react';
 import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
 import {
@@ -482,6 +483,7 @@ const SubscriptionPlansCard = ({
               {plans.map((p, index) => {
                 const plan = p?.plan;
                 const totalAmount = Number(plan?.total_amount || 0);
+                const totalAmountCurrency = plan?.total_amount_currency || 'USD';
                 const price = Number(plan?.price_amount || 0);
                 const displayPrice = convertMoneyAmountToDisplay(
                   price,
@@ -493,7 +495,11 @@ const SubscriptionPlansCard = ({
                 const limitLabel = limit > 0 ? `${t('限购')} ${limit}` : null;
                 const totalLabel =
                   totalAmount > 0
-                    ? `${t('总额度')}: ${renderQuota(totalAmount)}`
+                    ? `${t('总额度')}: ${convertMoneyAmountToDisplay(
+                        quotaToCurrencyAmount(totalAmount, totalAmountCurrency),
+                        totalAmountCurrency,
+                        2,
+                      )}`
                     : `${t('总额度')}: ${t('不限')}`;
                 const upgradeLabel = plan?.upgrade_group
                   ? `${t('升级分组')}: ${plan.upgrade_group}`

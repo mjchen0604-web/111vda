@@ -45,7 +45,7 @@ import {
   formatDateTimeString,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
-import NoticeImageUploader from '../../../components/settings/NoticeImageUploader';
+import NoticeContentEditor from '../../../components/settings/NoticeContentEditor';
 
 const { Text } = Typography;
 
@@ -312,15 +312,6 @@ const SettingsAnnouncements = ({ options, refresh }) => {
       setModalLoading(false);
     }
   };
-
-  const handleInsertAnnouncementImage = (markdown) => {
-    const nextContent = announcementForm.content
-      ? `${announcementForm.content}\n\n${markdown}`
-      : markdown;
-    setAnnouncementForm((prev) => ({ ...prev, content: nextContent }));
-    formApiRef.current?.setValue('content', nextContent);
-  };
-
   const parseAnnouncements = (announcementsStr) => {
     if (!announcementsStr) {
       setAnnouncementsList([]);
@@ -541,20 +532,17 @@ const SettingsAnnouncements = ({ options, refresh }) => {
           key={editingAnnouncement ? editingAnnouncement.id : 'new'}
           getFormApi={(api) => (formApiRef.current = api)}
         >
-          <NoticeImageUploader
+          <NoticeContentEditor
             t={t}
-            onInsert={handleInsertAnnouncementImage}
-          />
-          <Form.TextArea
-            field='content'
-            label={t('公告内容')}
-            placeholder={t('请输入公告内容（支持 Markdown/HTML）')}
-            maxCount={500}
-            rows={3}
-            rules={[{ required: true, message: t('请输入公告内容') }]}
-            onChange={(value) =>
-              setAnnouncementForm({ ...announcementForm, content: value })
-            }
+            value={announcementForm.content}
+            placeholder={t('请输入公告内容（支持 Markdown 和 HTML）')}
+            previewTitle={t('首页系统公告预览')}
+            maxCount={5000}
+            rows={10}
+            onChange={(value) => {
+              setAnnouncementForm({ ...announcementForm, content: value });
+              formApiRef.current?.setValue('content', value);
+            }}
           />
           <Button
             theme='light'
@@ -629,15 +617,17 @@ const SettingsAnnouncements = ({ options, refresh }) => {
         cancelText={t('取消')}
         width={800}
       >
-        <TextArea
+        <NoticeContentEditor
+          t={t}
           value={announcementForm.content}
-          placeholder={t('请输入公告内容（支持 Markdown/HTML）')}
-          maxCount={500}
-          rows={15}
-          style={{ width: '100%' }}
-          onChange={(value) =>
-            setAnnouncementForm({ ...announcementForm, content: value })
-          }
+          placeholder={t('请输入公告内容（支持 Markdown 和 HTML）')}
+          previewTitle={t('首页系统公告预览')}
+          maxCount={5000}
+          rows={18}
+          onChange={(value) => {
+            setAnnouncementForm({ ...announcementForm, content: value });
+            formApiRef.current?.setValue('content', value);
+          }}
         />
       </Modal>
     </>

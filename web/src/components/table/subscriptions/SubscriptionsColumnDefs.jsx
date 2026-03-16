@@ -30,6 +30,7 @@ import {
   Tooltip,
 } from '@douyinfe/semi-ui';
 import { renderQuota } from '../../../helpers';
+import { quotaToCurrencyAmount } from '../../../helpers/quota';
 import { convertMoneyAmountToDisplay } from '../../../helpers/render';
 
 const { Text } = Typography;
@@ -88,7 +89,16 @@ const renderPlanTitle = (text, record, t) => {
         <Text type='tertiary'>{t('总额度')}</Text>
         {plan?.total_amount > 0 ? (
           <Tooltip content={`${t('原生额度')}：${plan.total_amount}`}>
-            <Text>{renderQuota(plan.total_amount)}</Text>
+            <Text>
+              {convertMoneyAmountToDisplay(
+                quotaToCurrencyAmount(
+                  plan.total_amount,
+                  plan?.total_amount_currency || 'USD',
+                ),
+                plan?.total_amount_currency || 'USD',
+                2,
+              )}
+            </Text>
           </Tooltip>
         ) : (
           <Text>{t('不限')}</Text>
@@ -178,11 +188,18 @@ const renderEnabled = (text, record, t) => {
 
 const renderTotalAmount = (text, record, t) => {
   const total = Number(record?.plan?.total_amount || 0);
+  const totalCurrency = record?.plan?.total_amount_currency || 'USD';
   return (
     <Text type={total > 0 ? 'secondary' : 'tertiary'}>
       {total > 0 ? (
         <Tooltip content={`${t('原生额度')}：${total}`}>
-          <span>{renderQuota(total)}</span>
+          <span>
+            {convertMoneyAmountToDisplay(
+              quotaToCurrencyAmount(total, totalCurrency),
+              totalCurrency,
+              2,
+            )}
+          </span>
         </Tooltip>
       ) : (
         t('不限')

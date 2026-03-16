@@ -78,7 +78,7 @@ const NoticeImageUploader = ({ t, onInsert }) => {
         size='small'
         style={{ display: 'block', marginTop: 8 }}
       >
-        {t('支持 JPG、PNG、GIF、WebP；上传后会自动插入 Markdown 图片链接。')}
+        {t('支持 JPG、PNG、GIF、WebP；上传后会自动插入可继续拖动的图片标签。')}
       </Text>
       {lastUpload?.url ? (
         <Text

@@ -1107,3 +1107,14 @@ html.dark .with-pastel-balls::before {
 .scrollbar-hide::-webkit-scrollbar-track {
   background: transparent;
 }
+
+.notice-content-scroll img,
+.notice-editor-preview img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.notice-editor-preview img {
+  cursor: move;
+}

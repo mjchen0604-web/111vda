@@ -41,8 +41,8 @@ import {
 import { Clock, RefreshCw } from 'lucide-react';
 import { API, showError, showSuccess } from '../../../../helpers';
 import {
-  quotaToDisplayAmount,
-  displayAmountToQuota,
+  quotaToCurrencyAmount,
+  currencyAmountToQuota,
 } from '../../../../helpers/quota';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 
@@ -85,6 +85,7 @@ const AddEditSubscriptionModal = ({
     subtitle: '',
     price_amount: 0,
     currency: 'USD',
+    total_amount_currency: 'USD',
     duration_unit: 'month',
     duration_value: 1,
     custom_seconds: 0,
@@ -109,6 +110,7 @@ const AddEditSubscriptionModal = ({
       subtitle: p.subtitle || '',
       price_amount: Number(p.price_amount || 0),
       currency: p.currency || 'USD',
+      total_amount_currency: p.total_amount_currency || 'USD',
       duration_unit: p.duration_unit || 'month',
       duration_value: Number(p.duration_value || 1),
       custom_seconds: Number(p.custom_seconds || 0),
@@ -118,7 +120,10 @@ const AddEditSubscriptionModal = ({
       sort_order: Number(p.sort_order || 0),
       max_purchase_per_user: Number(p.max_purchase_per_user || 0),
       total_amount: Number(
-        quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
+        quotaToCurrencyAmount(
+          p.total_amount || 0,
+          p.total_amount_currency || 'USD',
+        ).toFixed(2),
       ),
       upgrade_group: p.upgrade_group || '',
       stripe_price_id: p.stripe_price_id || '',
@@ -153,6 +158,7 @@ const AddEditSubscriptionModal = ({
           ...values,
           price_amount: Number(values.price_amount || 0),
           currency: values.currency || 'USD',
+          total_amount_currency: values.total_amount_currency || 'USD',
           duration_value: Number(values.duration_value || 0),
           custom_seconds: Number(values.custom_seconds || 0),
           quota_reset_period: values.quota_reset_period || 'never',
@@ -162,7 +168,10 @@ const AddEditSubscriptionModal = ({
               : 0,
           sort_order: Number(values.sort_order || 0),
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
-          total_amount: displayAmountToQuota(values.total_amount),
+          total_amount: currencyAmountToQuota(
+            values.total_amount,
+            values.total_amount_currency || 'USD',
+          ),
           upgrade_group: values.upgrade_group || '',
         },
       };
@@ -295,7 +304,7 @@ const AddEditSubscriptionModal = ({
                       />
                     </Col>
 
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.InputNumber
                         field='price_amount'
                         label={t('实付金额')}
@@ -307,7 +316,19 @@ const AddEditSubscriptionModal = ({
                       />
                     </Col>
 
-                    <Col span={12}>
+                    <Col span={4}>
+                      <Form.Select
+                        field='currency'
+                        label={t('实付金额币种')}
+                        optionList={[
+                          { value: 'USD', label: 'USD' },
+                          { value: 'CNY', label: 'CNY' },
+                        ]}
+                        extraText={t('不影响总额度')}
+                      />
+                    </Col>
+
+                    <Col span={8}>
                       <Form.InputNumber
                         field='total_amount'
                         label={t('总额度')}
@@ -315,10 +336,23 @@ const AddEditSubscriptionModal = ({
                         min={0}
                         precision={2}
                         rules={[{ required: true, message: t('请输入总额度') }]}
-                        extraText={`${t('0 表示不限')} · ${t('原生额度')}：${displayAmountToQuota(
+                        extraText={`${t('0 表示不限')} · ${t('原生额度')}：${currencyAmountToQuota(
                           values.total_amount,
+                          values.total_amount_currency || 'USD',
                         )}`}
                         style={{ width: '100%' }}
+                      />
+                    </Col>
+
+                    <Col span={4}>
+                      <Form.Select
+                        field='total_amount_currency'
+                        label={t('总额度币种')}
+                        optionList={[
+                          { value: 'USD', label: 'USD' },
+                          { value: 'CNY', label: 'CNY' },
+                        ]}
+                        extraText={t('和实付金额币种独立')}
                       />
                     </Col>
 
@@ -340,18 +374,6 @@ const AddEditSubscriptionModal = ({
                           </Select.Option>
                         ))}
                       </Form.Select>
-                    </Col>
-
-                    <Col span={12}>
-                      <Form.Select
-                        field='currency'
-                        label={t('币种')}
-                        optionList={[
-                          { value: 'USD', label: 'USD' },
-                          { value: 'CNY', label: 'CNY' },
-                        ]}
-                        extraText={t('实付金额币种可独立设置，不影响总额度')}
-                      />
                     </Col>
 
                     <Col span={12}>

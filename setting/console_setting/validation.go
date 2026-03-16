@@ -172,8 +172,8 @@ func validateAnnouncements(announcementsStr string) error {
 				}
 			}
 		}
-		if len(content) > 500 {
-			return fmt.Errorf("第%d个公告的内容长度不能超过500字符", i+1)
+		if len(content) > 5000 {
+			return fmt.Errorf("第%d个公告的内容长度不能超过5000字符", i+1)
 		}
 		if extra, exists := ann["extra"]; exists {
 			if extraStr, ok := extra.(string); ok && len(extraStr) > 200 {
