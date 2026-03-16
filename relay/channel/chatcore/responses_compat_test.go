@@ -89,7 +89,7 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 	}
 }
 
-func TestResponsesRequestToChatCompletionsRequestPreservesBuiltInSearchTools(t *testing.T) {
+func TestResponsesRequestToChatCompletionsRequestRejectsBuiltInSearchTools(t *testing.T) {
 	toolChoice, _ := common.Marshal("auto")
 	tools, _ := common.Marshal([]map[string]any{
 		{"type": "web_search"},
@@ -108,29 +108,17 @@ func TestResponsesRequestToChatCompletionsRequestPreservesBuiltInSearchTools(t *
 		},
 	})
 
-	converted, err := responsesRequestToChatCompletionsRequest(dto.OpenAIResponsesRequest{
+	_, err := responsesRequestToChatCompletionsRequest(dto.OpenAIResponsesRequest{
 		Model:      "gpt-5.4",
 		Input:      input,
 		ToolChoice: toolChoice,
 		Tools:      tools,
 	})
-	if err != nil {
+	if err == nil {
+		t.Fatal("expected built-in web_search to be rejected")
+	}
+	if !strings.Contains(err.Error(), "built-in web_search is disabled by this server") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if converted["_chatcore_responses_compat"] != true {
-		t.Fatalf("expected _chatcore_responses_compat flag, got %#v", converted["_chatcore_responses_compat"])
-	}
-	responsesTools, ok := converted["responses_tools"].([]map[string]any)
-	if !ok || len(responsesTools) != 1 || responsesTools[0]["type"] != "web_search" {
-		t.Fatalf("expected responses_tools to preserve built-in search, got %#v", converted["responses_tools"])
-	}
-	toolsPayload, ok := converted["tools"].([]any)
-	if !ok || len(toolsPayload) != 1 {
-		t.Fatalf("expected one function tool in tools payload, got %#v", converted["tools"])
-	}
-	if converted["responses_tool_choice"] != "auto" {
-		t.Fatalf("expected responses_tool_choice=auto, got %#v", converted["responses_tool_choice"])
 	}
 }
 

@@ -529,14 +529,14 @@ def chat_completions() -> Response:
     include_usage = bool(stream_options.get("include_usage", False))
 
     raw_tools_payload = payload.get("tools") if isinstance(payload.get("tools"), list) else []
-    if not responses_compat_internal and any(
+    if any(
         isinstance(_t, dict) and _t.get("type") in ("web_search", "web_search_preview")
         for _t in raw_tools_payload
     ):
         err = {
             "error": {
-                "message": "Built-in web_search is only supported on /v1/responses",
-                "code": "WEB_SEARCH_RESPONSES_ONLY",
+                "message": "Built-in web_search is disabled by this server; use tool-based search instead",
+                "code": "WEB_SEARCH_DISABLED",
             }
         }
         if verbose:
@@ -561,11 +561,11 @@ def chat_completions() -> Response:
         }
     parallel_tool_calls = bool(payload.get("parallel_tool_calls", False))
     responses_tools_payload = payload.get("responses_tools") if isinstance(payload.get("responses_tools"), list) else []
-    if responses_tools_payload and not responses_compat_internal:
+    if responses_tools_payload:
         err = {
             "error": {
-                "message": "responses_tools is only supported on /v1/responses",
-                "code": "RESPONSES_TOOLS_RESPONSES_ONLY",
+                "message": "Built-in web_search is disabled by this server; use tool-based search instead",
+                "code": "WEB_SEARCH_DISABLED",
             }
         }
         if verbose:
@@ -574,47 +574,16 @@ def chat_completions() -> Response:
     builtin_search_tools: List[Dict[str, Any]] = []
     had_builtin_search_tools = False
     responses_tool_choice = payload.get("responses_tool_choice")
-    if isinstance(responses_tool_choice, str) and responses_tool_choice.strip() and not responses_compat_internal:
+    if isinstance(responses_tool_choice, str) and responses_tool_choice.strip():
         err = {
             "error": {
-                "message": "responses_tool_choice is only supported on /v1/responses",
-                "code": "RESPONSES_TOOL_CHOICE_RESPONSES_ONLY",
+                "message": "Built-in web_search is disabled by this server; use tool-based search instead",
+                "code": "WEB_SEARCH_DISABLED",
             }
         }
         if verbose:
             _log_json("OUT POST /v1/chat/completions", err)
         return jsonify(err), 400
-    if responses_compat_internal and isinstance(responses_tools_payload, list):
-        for _t in responses_tools_payload:
-            if not (isinstance(_t, dict) and isinstance(_t.get("type"), str)):
-                continue
-            if _t.get("type") not in ("web_search", "web_search_preview"):
-                err = {
-                    "error": {
-                        "message": "Only web_search/web_search_preview are supported in responses_tools",
-                        "code": "RESPONSES_TOOL_UNSUPPORTED",
-                    }
-                }
-                if verbose:
-                    _log_json("OUT POST /v1/chat/completions", err)
-                return jsonify(err), 400
-            builtin_search_tools.append({"type": _t.get("type")})
-        if builtin_search_tools:
-            import json as _json
-            MAX_TOOLS_BYTES = 32768
-            try:
-                size = len(_json.dumps(builtin_search_tools))
-            except Exception:
-                size = 0
-            if size > MAX_TOOLS_BYTES:
-                err = {"error": {"message": "responses_tools too large", "code": "RESPONSES_TOOLS_TOO_LARGE"}}
-                if verbose:
-                    _log_json("OUT POST /v1/chat/completions", err)
-                return jsonify(err), 400
-            had_builtin_search_tools = True
-            tools_responses = (tools_responses or []) + builtin_search_tools
-        if isinstance(responses_tool_choice, str) and responses_tool_choice in ("auto", "none"):
-            tool_choice = responses_tool_choice
 
     input_items = convert_chat_messages_to_responses_input(messages)
     if not input_items and isinstance(payload.get("prompt"), str) and payload.get("prompt").strip():

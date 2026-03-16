@@ -312,7 +312,7 @@ def ollama_chat() -> Response:
         isinstance(_t, dict) and _t.get("type") in ("web_search", "web_search_preview")
         for _t in tools_req
     ):
-        err = {"error": "Built-in web_search is only supported on /v1/responses"}
+        err = {"error": "Built-in web_search is disabled by this server; use tool-based search instead"}
         if verbose:
             _log_json("OUT POST /api/chat", err)
         return jsonify(err), 400
@@ -324,14 +324,14 @@ def ollama_chat() -> Response:
     had_responses_tools = False
     rt_payload = payload.get("responses_tools") if isinstance(payload.get("responses_tools"), list) else []
     if rt_payload:
-        err = {"error": "responses_tools is only supported on /v1/responses"}
+        err = {"error": "Built-in web_search is disabled by this server; use tool-based search instead"}
         if verbose:
             _log_json("OUT POST /api/chat", err)
         return jsonify(err), 400
 
     rtc = payload.get("responses_tool_choice")
     if isinstance(rtc, str) and rtc.strip():
-        err = {"error": "responses_tool_choice is only supported on /v1/responses"}
+        err = {"error": "Built-in web_search is disabled by this server; use tool-based search instead"}
         if verbose:
             _log_json("OUT POST /api/chat", err)
         return jsonify(err), 400

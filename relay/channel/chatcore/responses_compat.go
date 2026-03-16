@@ -198,8 +198,7 @@ func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest
 					toolType = "function"
 				}
 				if toolType == "web_search" || toolType == "web_search_preview" {
-					responsesTools = append(responsesTools, map[string]any{"type": toolType})
-					continue
+					return nil, fmt.Errorf("built-in web_search is disabled by this server; use tool-based search instead")
 				}
 				tool := dto.ToolCallRequest{
 					Type: toolType,
