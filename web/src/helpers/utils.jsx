@@ -742,7 +742,10 @@ export const calculateModelPrice = ({
   if (record.quota_type === 0) {
     // 按量计费
     const isTokensDisplay = quotaDisplayType === 'TOKENS';
-    const inputRatioPriceUSD = record.model_ratio * 2 * usedGroupRatio;
+    const modelName = String(record.model_name || '').toLowerCase();
+    const inputRatioBaseMultiplier = modelName.startsWith('gpt-5.4') ? 1 : 2;
+    const inputRatioPriceUSD =
+      record.model_ratio * inputRatioBaseMultiplier * usedGroupRatio;
     const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
     const unitLabel = tokenUnit === 'K' ? 'K' : 'M';
     const hasRatioValue = (value) =>

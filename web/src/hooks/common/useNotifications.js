@@ -18,10 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import { API } from '../../helpers';
 
 export const useNotifications = (statusState) => {
   const [noticeVisible, setNoticeVisible] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const location = useLocation();
 
   const announcements = statusState?.status?.announcements || [];
 
@@ -60,6 +63,33 @@ export const useNotifications = (statusState) => {
   useEffect(() => {
     setUnreadCount(calculateUnreadCount());
   }, [announcements]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const maybeOpenNotice = async () => {
+      if (location.pathname !== '/') {
+        return;
+      }
+      let hasLegacyNotice = false;
+      try {
+        const res = await API.get('/api/notice');
+        hasLegacyNotice = Boolean(
+          res?.data?.success && String(res?.data?.data || '').trim(),
+        );
+      } catch (_) {
+        hasLegacyNotice = false;
+      }
+      if (!cancelled && (hasLegacyNotice || announcements.length > 0)) {
+        setNoticeVisible(true);
+      }
+    };
+
+    maybeOpenNotice();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, announcements.length]);
 
   // Actions
   const handleNoticeOpen = () => {
