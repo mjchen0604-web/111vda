@@ -249,3 +249,43 @@ func TestResponsesCompatStreamHandlerEmitsAddedEvents(t *testing.T) {
 		t.Fatalf("expected response.output_item.done, got %s", body)
 	}
 }
+
+func TestResponsesCompatStreamHandlerEmitsFunctionCallEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	constant.StreamingTimeout = 1
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx.Set(common.RequestIdKey, "chatcore_resp_tool_stream")
+
+	streamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_234","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"mcp__CherryHub__list","arguments":"{\"query\":\"today\"}"}}]},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_234","object":"chat.completion.chunk","created":123,"model":"gpt-5.4-fast","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+		``,
+	}, "\n")
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(streamBody)),
+		Header:     make(http.Header),
+	}
+	info := &relaycommon.RelayInfo{}
+
+	_, err := responsesCompatStreamHandler(ctx, resp, info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"type":"response.output_item.added"`) {
+		t.Fatalf("expected response.output_item.added, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
+		t.Fatalf("expected response.function_call_arguments.delta, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
+		t.Fatalf("expected response.function_call_arguments.done, got %s", body)
+	}
+}

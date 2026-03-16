@@ -22,6 +22,7 @@ type chatcoreToolCallState struct {
 	ID        string
 	Name      string
 	Arguments strings.Builder
+	Added     bool
 }
 
 func isUndefinedText(value string) bool {
@@ -548,7 +549,42 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 				if strings.TrimSpace(toolCall.Function.Name) != "" {
 					state.Name = toolCall.Function.Name
 				}
+				callID := strings.TrimSpace(state.ID)
+				if callID == "" {
+					callID = fmt.Sprintf("call_%d", index)
+				}
+				itemID := "fc_" + callID
+				outputIndex := index
+				if sentMessageItemAdded || outputText.Len() > 0 {
+					outputIndex = index + 1
+				}
+				if !state.Added {
+					item := dto.ResponsesOutput{
+						Type:      "function_call",
+						ID:        itemID,
+						Status:    "in_progress",
+						CallId:    callID,
+						Name:      state.Name,
+						Arguments: "",
+					}
+					if !sendEvent(dto.ResponsesStreamResponse{
+						Type:        "response.output_item.added",
+						OutputIndex: common.GetPointer(outputIndex),
+						Item:        &item,
+					}) {
+						return false
+					}
+					state.Added = true
+				}
 				if toolCall.Function.Arguments != "" {
+					if !sendEvent(dto.ResponsesStreamResponse{
+						Type:        "response.function_call_arguments.delta",
+						ItemID:      itemID,
+						OutputIndex: common.GetPointer(outputIndex),
+						Delta:       toolCall.Function.Arguments,
+					}) {
+						return false
+					}
 					state.Arguments.WriteString(toolCall.Function.Arguments)
 				}
 			}
@@ -628,7 +664,15 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 		}
 		output = append(output, item)
 		if !sendEvent(dto.ResponsesStreamResponse{
+			Type:        "response.function_call_arguments.done",
+			ItemID:      item.ID,
+			OutputIndex: common.GetPointer(idx),
+		}) {
+			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response.function_call_arguments.done"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+		if !sendEvent(dto.ResponsesStreamResponse{
 			Type: "response.output_item.done",
+			OutputIndex: common.GetPointer(idx),
 			Item: &item,
 		}) {
 			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response.output_item.done"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
