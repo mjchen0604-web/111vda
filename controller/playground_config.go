@@ -61,6 +61,7 @@ type PlaygroundVisibilityRequest struct {
 
 type PlaygroundApplyRequest struct {
 	Scope   string `json:"scope,omitempty"`
+	Kind    string `json:"kind,omitempty"`
 	Enabled bool   `json:"enabled"`
 }
 
@@ -156,18 +157,20 @@ func GetPlaygroundConfig(c *gin.Context) {
 		adminDefaults = decodePlaygroundConfig("PlaygroundAdminDefaults")
 	}
 	userSettings, _ := model.GetUserSetting(userID, false)
-	applyToRealAPI := resolvePlaygroundApplyToRealAPI(c, userSettings)
+	applyPromptToRealAPI, applyModelConfigToRealAPI := resolvePlaygroundApplyFlags(userSettings)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"globalDefaults":          decodePlaygroundConfig("PlaygroundGlobalDefaults"),
-			"adminDefaults":           adminDefaults,
-			"personalDefaults":        sanitizePersonalPlaygroundConfig(userSettings.PlaygroundDefaults),
-			"applyToRealAPI":          applyToRealAPI,
-			"runtimeDefaultsPreview":  buildPlaygroundRuntimePreview(c),
-			"debugVisibility":         currentPlaygroundVisibility("PlaygroundDebugVisibility"),
-			"customRequestVisibility": currentPlaygroundVisibility("PlaygroundCustomRequestVisibility"),
+			"globalDefaults":            decodePlaygroundConfig("PlaygroundGlobalDefaults"),
+			"adminDefaults":             adminDefaults,
+			"personalDefaults":          sanitizePersonalPlaygroundConfig(userSettings.PlaygroundDefaults),
+			"applyToRealAPI":            applyPromptToRealAPI,
+			"applyPromptToRealAPI":      applyPromptToRealAPI,
+			"applyModelConfigToRealAPI": applyModelConfigToRealAPI,
+			"runtimeDefaultsPreview":    buildPlaygroundRuntimePreview(c),
+			"debugVisibility":           currentPlaygroundVisibility("PlaygroundDebugVisibility"),
+			"customRequestVisibility":   currentPlaygroundVisibility("PlaygroundCustomRequestVisibility"),
 		},
 	})
 }
@@ -262,55 +265,62 @@ func SavePlaygroundApplyToRealAPI(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid payload"})
 		return
 	}
-	scope := strings.ToLower(strings.TrimSpace(req.Scope))
-	if scope == "" {
-		scope = "personal"
+	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+	if kind == "" {
+		kind = "prompt"
 	}
-	switch scope {
-	case "global", "admin":
-		if c.GetInt("role") < common.RoleAdminUser {
-			c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "admin only"})
-			return
-		}
-		optionKey := "PlaygroundGlobalApplyToRealAPI"
-		if scope == "admin" {
-			optionKey = "PlaygroundAdminApplyToRealAPI"
-		}
-		value := "false"
-		if req.Enabled {
-			value = "true"
-		}
-		if err := model.UpdateOption(optionKey, value); err != nil {
-			common.ApiError(c, err)
-			return
-		}
-	case "personal":
-		userID := c.GetInt("id")
-		user, err := model.GetUserById(userID, true)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		userSetting := user.GetSetting()
-		enabled := req.Enabled
-		userSetting.PlaygroundApplyToRealAPI = &enabled
-		user.SetSetting(userSetting)
-		if err := user.Update(false); err != nil {
-			common.ApiError(c, err)
-			return
-		}
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "scope must be personal, global, or admin"})
+	if kind != "prompt" && kind != "model_config" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "kind must be prompt or model_config"})
+		return
+	}
+	userID := c.GetInt("id")
+	user, err := model.GetUserById(userID, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	userSetting := user.GetSetting()
+	enabled := req.Enabled
+	if kind == "prompt" {
+		userSetting.PlaygroundApplyPromptToRealAPI = &enabled
+	} else {
+		userSetting.PlaygroundApplyModelConfigToRealAPI = &enabled
+	}
+	user.SetSetting(userSetting)
+	if err := user.Update(false); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"scope":   scope,
+			"kind":    kind,
 			"enabled": req.Enabled,
 		},
 	})
+}
+
+func resolvePlaygroundApplyFlags(userSettings dto.UserSetting) (bool, bool) {
+	legacy := currentPlaygroundApplyOption("PlaygroundGlobalApplyToRealAPI", true)
+	legacy = currentPlaygroundApplyOption("PlaygroundAdminApplyToRealAPI", legacy)
+	if userSettings.PlaygroundApplyToRealAPI != nil {
+		legacy = *userSettings.PlaygroundApplyToRealAPI
+	}
+	applyPrompt := legacy
+	applyModelConfig := legacy
+	if userSettings.PlaygroundApplyPromptToRealAPI != nil {
+		applyPrompt = *userSettings.PlaygroundApplyPromptToRealAPI
+	}
+	if userSettings.PlaygroundApplyModelConfigToRealAPI != nil {
+		applyModelConfig = *userSettings.PlaygroundApplyModelConfigToRealAPI
+	}
+	return applyPrompt, applyModelConfig
+}
+
+func resolvePlaygroundApplyToRealAPI(c *gin.Context, userSettings dto.UserSetting) bool {
+	applyPrompt, _ := resolvePlaygroundApplyFlags(userSettings)
+	return applyPrompt
 }
 
 func currentPlaygroundApplyOption(optionKey string, fallback bool) bool {
@@ -325,15 +335,4 @@ func currentPlaygroundApplyOption(optionKey string, fallback bool) bool {
 	default:
 		return fallback
 	}
-}
-
-func resolvePlaygroundApplyToRealAPI(c *gin.Context, userSettings dto.UserSetting) bool {
-	enabled := currentPlaygroundApplyOption("PlaygroundGlobalApplyToRealAPI", true)
-	if c.GetInt("role") >= common.RoleAdminUser {
-		enabled = currentPlaygroundApplyOption("PlaygroundAdminApplyToRealAPI", enabled)
-	}
-	if userSettings.PlaygroundApplyToRealAPI != nil {
-		enabled = *userSettings.PlaygroundApplyToRealAPI
-	}
-	return enabled
 }

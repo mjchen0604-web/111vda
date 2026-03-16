@@ -75,9 +75,11 @@ export const OptimizedSettingsPanel = React.memo(
         JSON.stringify(nextProps.previewPayload) &&
       JSON.stringify(prevProps.adminControls) ===
         JSON.stringify(nextProps.adminControls) &&
-      prevProps.applyToRealAPI === nextProps.applyToRealAPI &&
-      prevProps.onApplyToRealAPIChange === nextProps.onApplyToRealAPIChange &&
-      prevProps.onSavePersonalDefaults === nextProps.onSavePersonalDefaults &&
+      prevProps.applyPromptToRealAPI === nextProps.applyPromptToRealAPI &&
+      prevProps.onApplyPromptToRealAPIChange === nextProps.onApplyPromptToRealAPIChange &&
+      prevProps.applyModelConfigToRealAPI === nextProps.applyModelConfigToRealAPI &&
+      prevProps.onApplyModelConfigToRealAPIChange === nextProps.onApplyModelConfigToRealAPIChange &&
+      prevProps.onPromptModeChange === nextProps.onPromptModeChange &&
       prevProps.effectHint === nextProps.effectHint &&
       prevProps.showSettings === nextProps.showSettings &&
       JSON.stringify(prevProps.messages) === JSON.stringify(nextProps.messages)

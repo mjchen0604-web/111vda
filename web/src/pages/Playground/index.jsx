@@ -99,7 +99,10 @@ const Playground = () => {
   const [debugData, setDebugData] = useState(DEFAULT_DEBUG_DATA);
   const [activeDebugTab, setActiveDebugTab] = useState('preview');
   const [previewPayload, setPreviewPayload] = useState(null);
-  const [applyToRealAPI, setApplyToRealAPI] = useState(false);
+  const [applyPromptToRealAPI, setApplyPromptToRealAPI] = useState(false);
+  const [applyModelConfigToRealAPI, setApplyModelConfigToRealAPI] = useState(false);
+  const applyToRealAPI = applyPromptToRealAPI;
+  const setApplyToRealAPI = setApplyPromptToRealAPI;
   const [featureFlags, setFeatureFlags] = useState({
     debugVisibility: 'off',
     customRequestVisibility: 'off',
@@ -124,6 +127,7 @@ const Playground = () => {
     handleConfigImport,
     handleConfigReset,
     applyRemoteDefaults,
+    setInputs,
     setShowSettings,
     setModels,
     setGroups,
@@ -153,7 +157,8 @@ const Playground = () => {
         throw new Error(apiMessage || 'failed to load playground config');
       }
       applyRemoteDefaults(data || {}, isAdminUser);
-      setApplyToRealAPI(Boolean(data?.applyToRealAPI));
+      setApplyPromptToRealAPI(Boolean(data?.applyPromptToRealAPI));
+      setApplyModelConfigToRealAPI(Boolean(data?.applyModelConfigToRealAPI));
       setDebugData((prev) => ({
         ...(prev || DEFAULT_DEBUG_DATA),
         runtimeDefaultsPreview: data?.runtimeDefaultsPreview
@@ -274,6 +279,86 @@ const Playground = () => {
       }
     },
     [savePersonalDefaults],
+  );
+
+  const saveApplyModelConfigToRealAPI = useCallback(
+    async (enabled) => {
+      try {
+        if (enabled) {
+          await savePersonalDefaults();
+        }
+        const res = await API.post('/api/playground/config/apply', {
+          scope: 'personal',
+          kind: 'model_config',
+          enabled,
+        });
+        if (!res.data?.success) {
+          throw new Error(res.data?.message || 'save failed');
+        }
+        setApplyModelConfigToRealAPI(enabled);
+        showSuccess(enabled ? '真实应用模型配置已开启' : '真实应用模型配置已关闭');
+      } catch (error) {
+        showError(error);
+      }
+    },
+    [savePersonalDefaults],
+  );
+
+  const handlePromptModeChange = useCallback(
+    async (mode) => {
+      const nextInputs = {
+        ...inputs,
+        promptMode: mode,
+        systemPrompt: mode === 'default' ? '' : inputs.systemPrompt,
+      };
+      setInputs(nextInputs);
+      if (applyPromptToRealAPI) {
+        try {
+          const res = await API.post('/api/playground/config/defaults', {
+            scope: 'personal',
+            config: {
+              inputs: nextInputs,
+              parameterEnabled,
+            },
+          });
+          if (!res.data?.success) {
+            throw new Error(res.data?.message || 'save failed');
+          }
+          showSuccess('已保存');
+        } catch (error) {
+          showError(error);
+        }
+      }
+    },
+    [applyPromptToRealAPI, inputs, parameterEnabled, setInputs],
+  );
+
+  const handleAdminGlobalPromptPreset = useCallback(
+    async (mode) => {
+      const nextInputs =
+        mode === 'native-empty'
+          ? { ...inputs, promptMode: 'native', systemPrompt: '' }
+          : { ...inputs, promptMode: 'default', systemPrompt: '' };
+      try {
+        const res = await API.post('/api/playground/config/defaults', {
+          scope: 'global',
+          config: {
+            inputs: {
+              promptMode: nextInputs.promptMode,
+              systemPrompt: nextInputs.systemPrompt,
+            },
+          },
+        });
+        if (!res.data?.success) {
+          throw new Error(res.data?.message || 'save failed');
+        }
+        setInputs(nextInputs);
+        showSuccess('已保存');
+      } catch (error) {
+        showError(error);
+      }
+    },
+    [inputs, setInputs],
   );
 
   const saveVisibility = useCallback(
@@ -609,8 +694,7 @@ const Playground = () => {
   const adminControls = isAdminUser
     ? {
         enabled: true,
-        onSaveDefaults: saveScopedDefaults,
-        onSaveGlobalPromptPreset: saveGlobalPromptPreset,
+        onSaveGlobalPromptPreset: handleAdminGlobalPromptPreset,
         debugVisibility: featureFlags.debugVisibility,
         customRequestVisibility: featureFlags.customRequestVisibility,
         onSaveVisibility: saveVisibility,
@@ -650,11 +734,13 @@ const Playground = () => {
                 onCustomRequestModeChange={setCustomRequestMode}
                 onCustomRequestBodyChange={setCustomRequestBody}
                 previewPayload={previewPayload}
-                applyToRealAPI={applyToRealAPI}
-                onApplyToRealAPIChange={saveApplyToRealAPI}
-                onSavePersonalDefaults={savePersonalDefaults}
+                applyPromptToRealAPI={applyPromptToRealAPI}
+                onApplyPromptToRealAPIChange={saveApplyToRealAPI}
+                applyModelConfigToRealAPI={applyModelConfigToRealAPI}
+                onApplyModelConfigToRealAPIChange={saveApplyModelConfigToRealAPI}
+                onPromptModeChange={handlePromptModeChange}
                 effectHint={
-                  applyToRealAPI
+                  applyModelConfigToRealAPI
                     ? t('这些配置会直接作用于 Playground 请求；未显式传参的真实 API 请求也会继承这 5 个默认参数。')
                     : t('这些配置会直接作用于 Playground 发出的真实 API 请求。')
                 }

@@ -3,6 +3,7 @@ package controller
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -11,26 +12,45 @@ import (
 )
 
 func applyPlaygroundRuntimeDefaults(c *gin.Context, request dto.Request) {
-	config, ok := loadPlaygroundRuntimeConfig(c)
+	config, applyPrompt, applyModelConfig, ok := loadPlaygroundRuntimeConfig(c)
 	if !ok {
 		return
 	}
 	switch req := request.(type) {
 	case *dto.GeneralOpenAIRequest:
-		applyPlaygroundDefaultsToOpenAIRequest(req, config)
+		if applyModelConfig {
+			applyPlaygroundModelConfigToOpenAIRequest(req, config)
+		}
+		if applyPrompt {
+			applyPlaygroundPromptConfigToOpenAIRequest(req, config)
+		}
 	case *dto.OpenAIResponsesRequest:
-		applyPlaygroundDefaultsToResponsesRequest(req, config)
+		if applyModelConfig {
+			applyPlaygroundModelConfigToResponsesRequest(req, config)
+		}
+		if applyPrompt {
+			applyPlaygroundPromptConfigToResponsesRequest(req, config)
+		}
+	case *dto.ClaudeRequest:
+		if applyModelConfig {
+			applyPlaygroundModelConfigToClaudeRequest(req, config)
+		}
+		if applyPrompt {
+			applyPlaygroundPromptConfigToClaudeRequest(req, config)
+		}
 	}
 }
 
 func buildPlaygroundRuntimePreview(c *gin.Context) map[string]any {
-	config, applyEnabled, ok := loadPlaygroundRuntimePreviewConfig(c)
+	config, applyPromptEnabled, applyModelConfigEnabled, ok := loadPlaygroundRuntimePreviewConfig(c)
 	if !ok {
 		return map[string]any{
-			"applyToRealAPI":    false,
-			"mergedInputs":      map[string]any{},
-			"injectWhenMissing": map[string]any{},
-			"enabledKeys":       []string{},
+			"applyToRealAPI":            false,
+			"applyPromptToRealAPI":      false,
+			"applyModelConfigToRealAPI": false,
+			"mergedInputs":              map[string]any{},
+			"injectWhenMissing":         map[string]any{},
+			"enabledKeys":               []string{},
 		}
 	}
 	injected := map[string]any{}
@@ -54,31 +74,33 @@ func buildPlaygroundRuntimePreview(c *gin.Context) map[string]any {
 		parameterEnabled = map[string]any{}
 	}
 	return map[string]any{
-		"applyToRealAPI":    applyEnabled,
-		"mergedInputs":      inputs,
-		"parameterEnabled":  parameterEnabled,
-		"injectWhenMissing": injected,
-		"enabledKeys":       enabledKeys,
-		"mode":              "fill_missing_only",
+		"applyToRealAPI":            applyPromptEnabled,
+		"applyPromptToRealAPI":      applyPromptEnabled,
+		"applyModelConfigToRealAPI": applyModelConfigEnabled,
+		"mergedInputs":              inputs,
+		"parameterEnabled":          parameterEnabled,
+		"injectWhenMissing":         injected,
+		"enabledKeys":               enabledKeys,
+		"mode":                      "fill_missing_only",
 	}
 }
 
-func loadPlaygroundRuntimeConfig(c *gin.Context) (map[string]any, bool) {
-	config, applyEnabled, ok := loadPlaygroundRuntimePreviewConfig(c)
-	if !ok || !applyEnabled {
-		return nil, false
+func loadPlaygroundRuntimeConfig(c *gin.Context) (map[string]any, bool, bool, bool) {
+	config, applyPromptEnabled, applyModelConfigEnabled, ok := loadPlaygroundRuntimePreviewConfig(c)
+	if !ok || (!applyPromptEnabled && !applyModelConfigEnabled) {
+		return nil, false, false, false
 	}
-	return config, true
+	return config, applyPromptEnabled, applyModelConfigEnabled, true
 }
 
-func loadPlaygroundRuntimePreviewConfig(c *gin.Context) (map[string]any, bool, bool) {
+func loadPlaygroundRuntimePreviewConfig(c *gin.Context) (map[string]any, bool, bool, bool) {
 	userID := c.GetInt("id")
 	if userID <= 0 {
-		return nil, false, false
+		return nil, false, false, false
 	}
 	userSetting, err := model.GetUserSetting(userID, false)
 	if err != nil {
-		return nil, false, false
+		return nil, false, false, false
 	}
 	merged := map[string]any{
 		"inputs":           map[string]any{},
@@ -89,7 +111,8 @@ func loadPlaygroundRuntimePreviewConfig(c *gin.Context) (map[string]any, bool, b
 		mergePlaygroundConfigInto(merged, decodePlaygroundConfig("PlaygroundAdminDefaults"))
 	}
 	mergePlaygroundConfigInto(merged, sanitizePersonalPlaygroundConfig(userSetting.PlaygroundDefaults))
-	return merged, resolvePlaygroundApplyToRealAPI(c, userSetting), true
+	applyPromptEnabled, applyModelConfigEnabled := resolvePlaygroundApplyFlags(userSetting)
+	return merged, applyPromptEnabled, applyModelConfigEnabled, true
 }
 
 func mergePlaygroundConfigInto(target map[string]any, source map[string]any) {
@@ -119,7 +142,7 @@ func mergePlaygroundConfigInto(target map[string]any, source map[string]any) {
 	}
 }
 
-func applyPlaygroundDefaultsToOpenAIRequest(req *dto.GeneralOpenAIRequest, config map[string]any) {
+func applyPlaygroundModelConfigToOpenAIRequest(req *dto.GeneralOpenAIRequest, config map[string]any) {
 	if req == nil {
 		return
 	}
@@ -150,7 +173,7 @@ func applyPlaygroundDefaultsToOpenAIRequest(req *dto.GeneralOpenAIRequest, confi
 	}
 }
 
-func applyPlaygroundDefaultsToResponsesRequest(req *dto.OpenAIResponsesRequest, config map[string]any) {
+func applyPlaygroundModelConfigToResponsesRequest(req *dto.OpenAIResponsesRequest, config map[string]any) {
 	if req == nil {
 		return
 	}
@@ -164,6 +187,90 @@ func applyPlaygroundDefaultsToResponsesRequest(req *dto.OpenAIResponsesRequest, 
 			req.TopP = &value
 		}
 	}
+}
+
+func applyPlaygroundModelConfigToClaudeRequest(req *dto.ClaudeRequest, config map[string]any) {
+	if req == nil {
+		return
+	}
+	if req.Temperature == nil && playgroundParamEnabled(config, "temperature") {
+		if value, ok := playgroundFloat(config, "temperature"); ok {
+			req.Temperature = &value
+		}
+	}
+	if req.TopP == nil && playgroundParamEnabled(config, "top_p") {
+		if value, ok := playgroundFloat(config, "top_p"); ok {
+			req.TopP = &value
+		}
+	}
+}
+
+func applyPlaygroundPromptConfigToOpenAIRequest(req *dto.GeneralOpenAIRequest, config map[string]any) {
+	if req == nil {
+		return
+	}
+	if req.PromptMode == "" {
+		if value, ok := playgroundInput(config, "promptMode"); ok {
+			if text, ok := value.(string); ok && text != "" {
+				req.PromptMode = text
+			}
+		}
+	}
+	if req.PromptMode == "native" && strings.TrimSpace(req.SystemPrompt) == "" {
+		if value, ok := playgroundInput(config, "systemPrompt"); ok {
+			if text, ok := value.(string); ok {
+				req.SystemPrompt = text
+			}
+		}
+	}
+}
+
+func applyPlaygroundPromptConfigToResponsesRequest(req *dto.OpenAIResponsesRequest, config map[string]any) {
+	if req == nil {
+		return
+	}
+	if req.PromptMode == "" {
+		if value, ok := playgroundInput(config, "promptMode"); ok {
+			if text, ok := value.(string); ok && text != "" {
+				req.PromptMode = text
+			}
+		}
+	}
+	if req.PromptMode == "native" && strings.TrimSpace(req.SystemPrompt) == "" {
+		if value, ok := playgroundInput(config, "systemPrompt"); ok {
+			if text, ok := value.(string); ok {
+				req.SystemPrompt = text
+			}
+		}
+	}
+}
+
+func applyPlaygroundPromptConfigToClaudeRequest(req *dto.ClaudeRequest, config map[string]any) {
+	if req == nil {
+		return
+	}
+	if req.PromptMode == "" {
+		if value, ok := playgroundInput(config, "promptMode"); ok {
+			if text, ok := value.(string); ok && text != "" {
+				req.PromptMode = text
+			}
+		}
+	}
+	if req.PromptMode == "native" && strings.TrimSpace(req.SystemPrompt) == "" {
+		if value, ok := playgroundInput(config, "systemPrompt"); ok {
+			if text, ok := value.(string); ok {
+				req.SystemPrompt = text
+			}
+		}
+	}
+}
+
+func applyPlaygroundDefaultsToOpenAIRequest(req *dto.GeneralOpenAIRequest, config map[string]any) {
+	applyPlaygroundModelConfigToOpenAIRequest(req, config)
+}
+
+func applyPlaygroundDefaultsToResponsesRequest(req *dto.OpenAIResponsesRequest, config map[string]any) {
+	applyPlaygroundModelConfigToResponsesRequest(req, config)
 }
 
 func playgroundParamEnabled(config map[string]any, key string) bool {

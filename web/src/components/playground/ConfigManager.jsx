@@ -27,7 +27,6 @@ import {
   clearConfig,
   hasStoredConfig,
   getConfigTimestamp,
-  saveConfig,
 } from './configStorage';
 
 const ConfigManager = ({
@@ -36,24 +35,17 @@ const ConfigManager = ({
   onConfigReset,
   styleState,
   messages,
-  adminControls,
-  onSavePersonalDefaults,
 }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
 
   const handleExport = () => {
     try {
-      // 在导出前先保存当前配置，确保导出的是最新内容
       const configWithTimestamp = {
         ...currentConfig,
         timestamp: new Date().toISOString(),
       };
-      localStorage.setItem(
-        'playground_config',
-        JSON.stringify(configWithTimestamp),
-      );
-
+      localStorage.setItem('playground_config', JSON.stringify(configWithTimestamp));
       exportConfig(currentConfig, messages);
       Toast.success({
         content: t('配置已导出到下载文件夹'),
@@ -71,31 +63,12 @@ const ConfigManager = ({
     fileInputRef.current?.click();
   };
 
-  const handleSavePersonalDefaults = async () => {
-    try {
-      saveConfig(currentConfig);
-      if (onSavePersonalDefaults) {
-        await onSavePersonalDefaults();
-      }
-      Toast.success({
-        content: t('个人默认已保存'),
-        duration: 3,
-      });
-    } catch (error) {
-      Toast.error({
-        content: t('保存个人默认失败: ') + error.message,
-        duration: 3,
-      });
-    }
-  };
-
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
     try {
       const importedConfig = await importConfig(file);
-
       Modal.confirm({
         title: t('确认导入配置'),
         content: t('导入的配置将覆盖当前设置，是否继续？'),
@@ -115,7 +88,6 @@ const ConfigManager = ({
         duration: 3,
       });
     } finally {
-      // 重置文件输入，允许重复选择同一文件
       event.target.value = '';
     }
   };
@@ -123,26 +95,17 @@ const ConfigManager = ({
   const handleReset = () => {
     Modal.confirm({
       title: t('重置配置'),
-      content: t(
-        '将清除所有保存的配置并恢复默认设置，此操作不可撤销。是否继续？',
-      ),
+      content: t('将清除所有保存的配置并恢复默认设置，此操作不可撤销。是否继续？'),
       okText: t('确定重置'),
       cancelText: t('取消'),
-      okButtonProps: {
-        type: 'danger',
-      },
+      okButtonProps: { type: 'danger' },
       onOk: () => {
-        // 询问是否同时重置消息
         Modal.confirm({
           title: t('重置选项'),
-          content: t(
-            '是否同时重置对话消息？选择"是"将清空所有对话记录并恢复默认示例；选择"否"将保留当前对话记录。',
-          ),
+          content: t('是否同时重置对话消息？选择“是”将清空所有对话记录并恢复默认示例；选择“否”将保留当前对话记录。'),
           okText: t('同时重置消息'),
           cancelText: t('仅重置配置'),
-          okButtonProps: {
-            type: 'danger',
-          },
+          okButtonProps: { type: 'danger' },
           onOk: () => {
             clearConfig();
             onConfigReset({ resetMessages: true });
@@ -177,20 +140,6 @@ const ConfigManager = ({
   };
 
   const dropdownItems = [
-    {
-      node: 'item',
-      name: 'save-personal-defaults',
-      onClick: handleSavePersonalDefaults,
-      children: (
-        <div className='flex items-center gap-2'>
-          <Settings2 size={14} />
-          {t('保存为个人默认')}
-        </div>
-      ),
-    },
-    {
-      node: 'divider',
-    },
     {
       node: 'item',
       name: 'export',
@@ -229,44 +178,10 @@ const ConfigManager = ({
     },
   ];
 
-  if (adminControls?.enabled) {
-    dropdownItems.splice(2, 0,
-      {
-        node: 'item',
-        name: 'save-admin-defaults',
-        onClick: () => adminControls.onSaveDefaults?.('admin'),
-        children: (
-          <div className='flex items-center gap-2'>
-            <Settings2 size={14} />
-            {t('保存为管理员默认')}
-          </div>
-        ),
-      },
-      {
-        node: 'item',
-        name: 'save-global-defaults',
-        onClick: () => adminControls.onSaveDefaults?.('global'),
-        children: (
-          <div className='flex items-center gap-2'>
-            <Settings2 size={14} />
-            {t('保存为全局默认')}
-          </div>
-        ),
-      },
-      { node: 'divider' },
-    );
-  }
-
   if (styleState.isMobile) {
-    // 移动端显示简化的下拉菜单
     return (
       <>
-        <Dropdown
-          trigger='click'
-          position='bottomLeft'
-          showTick
-          menu={dropdownItems}
-        >
+        <Dropdown trigger='click' position='bottomLeft' showTick menu={dropdownItems}>
           <Button
             icon={<Settings2 size={14} />}
             theme='borderless'
@@ -275,7 +190,6 @@ const ConfigManager = ({
             className='!rounded-lg !text-gray-600 hover:!text-blue-600 hover:!bg-blue-50'
           />
         </Dropdown>
-
         <input
           ref={fileInputRef}
           type='file'
@@ -287,10 +201,8 @@ const ConfigManager = ({
     );
   }
 
-  // 桌面端显示紧凑的按钮组
   return (
     <div className='space-y-3'>
-      {/* 配置状态信息和重置按钮 */}
       <div className='flex items-center justify-between'>
         <Typography.Text className='text-xs text-gray-500'>
           {getConfigStatus()}
@@ -305,20 +217,7 @@ const ConfigManager = ({
         />
       </div>
 
-      {/* 导出和导入按钮 */}
       <div className='flex gap-2'>
-        {!adminControls?.enabled && (
-          <Button
-            icon={<Settings2 size={12} />}
-            size='small'
-            theme='solid'
-            type='secondary'
-            onClick={handleSavePersonalDefaults}
-            className='!rounded-lg flex-1 !text-xs !h-7'
-          >
-            {t('个人默认')}
-          </Button>
-        )}
         <Button
           icon={<Download size={12} />}
           size='small'
@@ -329,7 +228,6 @@ const ConfigManager = ({
         >
           {t('导出')}
         </Button>
-
         <Button
           icon={<Upload size={12} />}
           size='small'
@@ -341,38 +239,6 @@ const ConfigManager = ({
           {t('导入')}
         </Button>
       </div>
-
-      {adminControls?.enabled && (
-        <div className='flex gap-2'>
-          <Button
-            size='small'
-            theme='solid'
-            type='primary'
-            onClick={handleSavePersonalDefaults}
-            className='!rounded-lg flex-1 !text-xs !h-7'
-          >
-            {t('个人默认')}
-          </Button>
-          <Button
-            size='small'
-            theme='outline'
-            type='secondary'
-            onClick={() => adminControls.onSaveDefaults?.('admin')}
-            className='!rounded-lg flex-1 !text-xs !h-7'
-          >
-            {t('管理员默认')}
-          </Button>
-          <Button
-            size='small'
-            theme='outline'
-            type='warning'
-            onClick={() => adminControls.onSaveDefaults?.('global')}
-            className='!rounded-lg flex-1 !text-xs !h-7'
-          >
-            {t('全局默认')}
-          </Button>
-        </div>
-      )}
 
       <input
         ref={fileInputRef}

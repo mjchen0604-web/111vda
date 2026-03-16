@@ -815,9 +815,11 @@ type WebSearchOptions struct {
 
 // https://platform.openai.com/docs/api-reference/responses/create
 type OpenAIResponsesRequest struct {
-	Model   string          `json:"model"`
-	Input   json.RawMessage `json:"input,omitempty"`
-	Include json.RawMessage `json:"include,omitempty"`
+	Model        string          `json:"model"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	Include      json.RawMessage `json:"include,omitempty"`
+	PromptMode   string          `json:"prompt_mode,omitempty"`
+	SystemPrompt string          `json:"system_prompt,omitempty"`
 	// 在后台运行推理，暂时还不支持依赖的接口
 	// Background         json.RawMessage `json:"background,omitempty"`
 	Conversation       json.RawMessage `json:"conversation,omitempty"`

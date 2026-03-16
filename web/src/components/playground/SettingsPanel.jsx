@@ -53,9 +53,11 @@ const SettingsPanel = ({
   onCustomRequestBodyChange,
   previewPayload,
   effectHint,
-  applyToRealAPI,
-  onApplyToRealAPIChange,
-  onSavePersonalDefaults,
+  applyPromptToRealAPI,
+  onApplyPromptToRealAPIChange,
+  applyModelConfigToRealAPI,
+  onApplyModelConfigToRealAPIChange,
+  onPromptModeChange,
 }) => {
   const { t } = useTranslation();
 
@@ -104,9 +106,7 @@ const SettingsPanel = ({
             onConfigImport={onConfigImport}
             onConfigReset={onConfigReset}
             styleState={{ ...styleState, isMobile: false }}
-            adminControls={adminControls}
             messages={messages}
-            onSavePersonalDefaults={onSavePersonalDefaults}
           />
         </div>
       )}
@@ -138,35 +138,48 @@ const SettingsPanel = ({
         </div>
 
         <div className='space-y-3 rounded-xl border border-[var(--semi-color-border)] p-3'>
-          <div className='flex items-center justify-between gap-3'>
-            <div>
-              <Typography.Text strong className='text-sm'>
-                {t('提示词模式')}
-              </Typography.Text>
-              <Typography.Text className='text-xs text-gray-500 block mt-1'>
-                {t(
-                  '默认模式保留内置桥接提示词，原生模式跳过内置桥接提示词，可自行填写提示词。',
-                )}
-              </Typography.Text>
-            </div>
-            <div className='flex items-center gap-2 flex-shrink-0'>
-              <Typography.Text strong className='text-sm'>
-                {t('是否真实应用')}
-              </Typography.Text>
-              <Switch
-                checked={applyToRealAPI}
-                onChange={onApplyToRealAPIChange}
-                checkedText={t('开')}
-                uncheckedText={t('关')}
-                size='small'
-              />
-            </div>
+          <div>
+            <Typography.Text strong className='text-sm'>
+              {t('提示词模式')}
+            </Typography.Text>
+            <Typography.Text className='text-xs text-gray-500 block mt-1'>
+              {t('默认模式使用内置基线提示词；原生格式使用空提示词或你自己填写的提示词。')}
+            </Typography.Text>
           </div>
+
+          <div className='flex items-center justify-between gap-3'>
+            <Typography.Text strong className='text-sm'>
+              {t('是否真实应用')}
+            </Typography.Text>
+            <Switch
+              checked={applyPromptToRealAPI}
+              onChange={onApplyPromptToRealAPIChange}
+              checkedText={t('开')}
+              uncheckedText={t('关')}
+              size='small'
+            />
+          </div>
+
+          <div className='flex items-center justify-between gap-3'>
+            <Typography.Text className='text-xs text-gray-500'>
+              {applyModelConfigToRealAPI
+                ? t('模型配置这五个参数会带到真实请求体')
+                : t('模型配置这五个参数不会带到真实请求体')}
+            </Typography.Text>
+            <Switch
+              checked={applyModelConfigToRealAPI}
+              onChange={onApplyModelConfigToRealAPIChange}
+              checkedText={t('开')}
+              uncheckedText={t('关')}
+              size='small'
+            />
+          </div>
+
           <div className='grid grid-cols-2 gap-2'>
             <Button
               theme={inputs.promptMode === 'default' ? 'solid' : 'light'}
               type={inputs.promptMode === 'default' ? 'primary' : 'tertiary'}
-              onClick={() => onInputChange('promptMode', 'default')}
+              onClick={() => onPromptModeChange('default')}
               className='!rounded-lg'
             >
               {t('默认')}
@@ -174,40 +187,35 @@ const SettingsPanel = ({
             <Button
               theme={inputs.promptMode === 'native' ? 'solid' : 'light'}
               type={inputs.promptMode === 'native' ? 'primary' : 'tertiary'}
-              onClick={() => onInputChange('promptMode', 'native')}
+              onClick={() => onPromptModeChange('native')}
               className='!rounded-lg'
             >
               {t('原生格式')}
             </Button>
           </div>
+
           <TextArea
             value={inputs.systemPrompt || ''}
             onChange={(value) => onInputChange('systemPrompt', value)}
-            disabled={inputs.promptMode !== 'native'}
+            disabled={inputs.promptMode !== 'native' || applyPromptToRealAPI}
             autosize={{ minRows: 4, maxRows: 10 }}
-            placeholder={t(
-              '原生模式下可选填写自定义提示词；留空则不额外附加提示词。',
-            )}
+            placeholder={t('原生格式下可填写自定义提示词；留空则使用空提示词。')}
             className='!rounded-lg'
           />
 
           {adminControls?.enabled && (
             <div className='rounded-lg bg-[var(--semi-color-fill-0)] p-3'>
               <Typography.Text strong className='text-sm block mb-2'>
-                {t('管理员快捷切换全局默认提示词')}
+                {t('管理员全局提示词快捷切换')}
               </Typography.Text>
               <Typography.Text className='text-xs text-gray-500 block mb-3'>
-                {t(
-                  '此操作只修改全局默认，用户个人默认仍然优先于管理员和全局默认。',
-                )}
+                {t('点击哪边就把全局默认提示词保存到哪边，并同步当前上方显示。')}
               </Typography.Text>
               <div className='grid grid-cols-2 gap-2'>
                 <Button
                   theme='outline'
                   type='secondary'
-                  onClick={() =>
-                    adminControls.onSaveGlobalPromptPreset?.('default')
-                  }
+                  onClick={() => adminControls.onSaveGlobalPromptPreset?.('default')}
                   className='!rounded-lg'
                 >
                   {t('全局默认提示词')}
@@ -215,9 +223,7 @@ const SettingsPanel = ({
                 <Button
                   theme='outline'
                   type='warning'
-                  onClick={() =>
-                    adminControls.onSaveGlobalPromptPreset?.('native-empty')
-                  }
+                  onClick={() => adminControls.onSaveGlobalPromptPreset?.('native-empty')}
                   className='!rounded-lg'
                 >
                   {t('全局空提示词')}
@@ -343,9 +349,7 @@ const SettingsPanel = ({
             onConfigImport={onConfigImport}
             onConfigReset={onConfigReset}
             styleState={styleState}
-            adminControls={adminControls}
             messages={messages}
-            onSavePersonalDefaults={onSavePersonalDefaults}
           />
         </div>
       )}

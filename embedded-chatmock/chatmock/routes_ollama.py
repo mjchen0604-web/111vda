@@ -95,6 +95,22 @@ def _instructions_for_model(model: str) -> str:
     return base
 
 
+def _resolve_prompt_mode(payload: Dict[str, Any]) -> str:
+    value = payload.get("prompt_mode")
+    if isinstance(value, str) and value.strip().lower() == "native":
+        return "native"
+    return "default"
+
+
+def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
+    if _resolve_prompt_mode(payload) != "native":
+        return _instructions_for_model(model)
+    system_prompt = payload.get("system_prompt")
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        return system_prompt.strip()
+    return None
+
+
 def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_tier: str | None = None) -> int:
     configured_mode = str(current_app.config.get("UPSTREAM_MODE") or "auto").strip().lower()
     selected_mode = resolve_upstream_mode(configured_mode, model or "", service_tier)
@@ -359,7 +375,7 @@ def ollama_chat() -> Response:
         upstream, error_resp = start_upstream_request(
             normalized_model,
             input_items,
-            instructions=_instructions_for_model(normalized_model),
+            instructions=_resolve_bridge_instructions(normalized_model, payload),
             tools=tools_responses,
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
@@ -392,7 +408,7 @@ def ollama_chat() -> Response:
                 upstream2, err2 = start_upstream_request(
                     normalize_model_name(model),
                     input_items,
-                    instructions=BASE_INSTRUCTIONS,
+                    instructions=_resolve_bridge_instructions(normalized_model, payload),
                     tools=base_tools_only,
                     tool_choice=safe_choice,
                     parallel_tool_calls=parallel_tool_calls,
@@ -663,7 +679,7 @@ def ollama_chat() -> Response:
                     next_upstream, next_error = start_upstream_request(
                         normalized_model,
                         input_items,
-                        instructions=_instructions_for_model(normalized_model),
+                        instructions=_resolve_bridge_instructions(normalized_model, payload),
                         tools=tools_responses,
                         tool_choice=tool_choice,
                         parallel_tool_calls=parallel_tool_calls,
