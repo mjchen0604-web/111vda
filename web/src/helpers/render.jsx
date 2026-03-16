@@ -1281,6 +1281,8 @@ function renderDisplayAmountFromUsd(usdAmount, digits = 6) {
 function renderPriceSimpleCore({
   modelRatio,
   modelPrice = -1,
+  modelName = '',
+  longContextMultiplier = 1,
   groupRatio,
   user_group_ratio,
   cacheTokens = 0,
@@ -1303,6 +1305,10 @@ function renderPriceSimpleCore({
   const finalGroupRatio = effectiveGroupRatio;
 
   const { symbol, rate } = getCurrencyConfig();
+  const normalizedModelName = String(modelName || '').toLowerCase();
+  const inputBaseMultiplier =
+    (normalizedModelName.startsWith('gpt-5.4') ? 1 : 2) *
+    Number(longContextMultiplier || 1);
   if (modelPrice !== -1) {
     if (isPriceDisplayMode(displayMode, modelPrice)) {
       return joinBillingSummary([
@@ -1348,14 +1354,14 @@ function renderPriceSimpleCore({
 
     parts.push(
       i18next.t('输入 {{price}} / 1M tokens', {
-        price: formatCompactDisplayPrice(modelRatio * 2.0),
+        price: formatCompactDisplayPrice(modelRatio * inputBaseMultiplier),
       }),
     );
 
     if (shouldShowCache) {
       parts.push(
         i18next.t('缓存读取 {{price}}', {
-          price: formatCompactDisplayPrice(modelRatio * 2.0 * cacheRatio),
+          price: formatCompactDisplayPrice(modelRatio * inputBaseMultiplier * cacheRatio),
         }),
       );
     }
@@ -1363,21 +1369,21 @@ function renderPriceSimpleCore({
     if (hasSplitCacheCreation && shouldShowCacheCreation5m) {
       parts.push(
         i18next.t('5m缓存创建 {{price}}', {
-          price: formatCompactDisplayPrice(modelRatio * 2.0 * cacheCreationRatio5m),
+          price: formatCompactDisplayPrice(modelRatio * inputBaseMultiplier * cacheCreationRatio5m),
         }),
       );
     }
     if (hasSplitCacheCreation && shouldShowCacheCreation1h) {
       parts.push(
         i18next.t('1h缓存创建 {{price}}', {
-          price: formatCompactDisplayPrice(modelRatio * 2.0 * cacheCreationRatio1h),
+          price: formatCompactDisplayPrice(modelRatio * inputBaseMultiplier * cacheCreationRatio1h),
         }),
       );
     }
     if (!hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
       parts.push(
         i18next.t('缓存创建 {{price}}', {
-          price: formatCompactDisplayPrice(modelRatio * 2.0 * cacheCreationRatio),
+          price: formatCompactDisplayPrice(modelRatio * inputBaseMultiplier * cacheCreationRatio),
         }),
       );
     }
@@ -1385,7 +1391,7 @@ function renderPriceSimpleCore({
     if (image) {
       parts.push(
         i18next.t('图片输入 {{price}}', {
-          price: formatCompactDisplayPrice(modelRatio * 2.0 * imageRatio),
+          price: formatCompactDisplayPrice(modelRatio * inputBaseMultiplier * imageRatio),
         }),
       );
     }
@@ -2043,6 +2049,8 @@ export function renderLogContent(
 export function renderModelPriceSimple(
   modelRatio,
   modelPrice = -1,
+  modelName = '',
+  longContextMultiplier = 1,
   groupRatio,
   user_group_ratio,
   cacheTokens = 0,
@@ -2062,6 +2070,8 @@ export function renderModelPriceSimple(
   return renderPriceSimpleCore({
     modelRatio,
     modelPrice,
+    modelName,
+    longContextMultiplier,
     groupRatio,
     user_group_ratio,
     cacheTokens,

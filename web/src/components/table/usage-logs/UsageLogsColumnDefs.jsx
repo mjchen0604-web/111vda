@@ -790,6 +790,8 @@ export const getLogsColumns = ({
           ? renderModelPriceSimple(
               other.model_ratio,
               other.model_price,
+              record.model_name,
+              other?.long_context_multiplier || 1,
               other.group_ratio,
               other?.user_group_ratio,
               other.cache_tokens || 0,
@@ -813,6 +815,8 @@ export const getLogsColumns = ({
           : renderModelPriceSimple(
               other.model_ratio,
               other.model_price,
+              record.model_name,
+              other?.long_context_multiplier || 1,
               other.group_ratio,
               other?.user_group_ratio,
               other.cache_tokens || 0,
