@@ -217,8 +217,6 @@ def _resolve_web_search_mode(
         return "live"
     if "cached" in requested_modes:
         return "cached"
-    if bool(current_app.config.get("DEFAULT_WEB_SEARCH")):
-        return "live"
     return "disabled"
 
 
@@ -571,11 +569,6 @@ def chat_completions() -> Response:
                     _log_json("OUT POST /v1/chat/completions", err)
                 return jsonify(err), 400
             builtin_search_tools.append({"type": _t.get("type")})
-
-        if not builtin_search_tools and bool(current_app.config.get("DEFAULT_WEB_SEARCH")):
-            responses_tool_choice = payload.get("responses_tool_choice")
-            if not (isinstance(responses_tool_choice, str) and responses_tool_choice == "none"):
-                builtin_search_tools = [{"type": "web_search"}]
 
         if builtin_search_tools:
             import json as _json

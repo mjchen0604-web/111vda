@@ -26,7 +26,6 @@ const nodes = {
   setReasoningSummary: $("set-reasoning-summary"),
   setReasoningCompat: $("set-reasoning-compat"),
   setExposeReasoningModels: $("set-expose-reasoning-models"),
-  setEnableWebSearch: $("set-enable-web-search"),
   setVerbose: $("set-verbose"),
   setVerboseObfuscation: $("set-verbose-obfuscation"),
   setHttpProxy: $("set-http-proxy"),
@@ -218,7 +217,6 @@ function readSettingsForm() {
     reasoningSummary: nodes.setReasoningSummary?.value || "auto",
     reasoningCompat: nodes.setReasoningCompat?.value || "think-tags",
     exposeReasoningModels: Boolean(nodes.setExposeReasoningModels?.checked),
-    enableWebSearch: Boolean(nodes.setEnableWebSearch?.checked),
     verbose: Boolean(nodes.setVerbose?.checked),
     verboseObfuscation: Boolean(nodes.setVerboseObfuscation?.checked),
     httpProxy: nodes.setHttpProxy?.value || "",
@@ -253,9 +251,6 @@ function applySettingsForm(settings = {}) {
   }
   if (nodes.setExposeReasoningModels) {
     nodes.setExposeReasoningModels.checked = Boolean(settings.exposeReasoningModels);
-  }
-  if (nodes.setEnableWebSearch) {
-    nodes.setEnableWebSearch.checked = Boolean(settings.enableWebSearch);
   }
   if (nodes.setVerbose) {
     nodes.setVerbose.checked = Boolean(settings.verbose);
@@ -347,7 +342,6 @@ function bindSettingsAutosave() {
     nodes.setReasoningSummary,
     nodes.setReasoningCompat,
     nodes.setExposeReasoningModels,
-    nodes.setEnableWebSearch,
     nodes.setVerbose,
     nodes.setVerboseObfuscation,
     nodes.setHttpProxy,
@@ -532,4 +526,3 @@ async function init() {
 }
 
 init();
-

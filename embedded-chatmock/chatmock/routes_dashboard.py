@@ -246,7 +246,7 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
         reasoning_summary = str(runtime_app.config.get("REASONING_SUMMARY", "auto"))
         reasoning_compat = str(runtime_app.config.get("REASONING_COMPAT", "think-tags"))
         expose_reasoning_models = bool(runtime_app.config.get("EXPOSE_REASONING_MODELS"))
-        enable_web_search = bool(runtime_app.config.get("DEFAULT_WEB_SEARCH"))
+        enable_web_search = False
         verbose = bool(runtime_app.config.get("VERBOSE"))
         verbose_obfuscation = bool(runtime_app.config.get("VERBOSE_OBFUSCATION"))
     else:
@@ -254,7 +254,7 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
         reasoning_summary = os.getenv("CHATGPT_LOCAL_REASONING_SUMMARY", "auto")
         reasoning_compat = os.getenv("CHATGPT_LOCAL_REASONING_COMPAT", "think-tags")
         expose_reasoning_models = _bool_env("CHATGPT_LOCAL_EXPOSE_REASONING_MODELS", default=False)
-        enable_web_search = _bool_env("CHATGPT_LOCAL_ENABLE_WEB_SEARCH", default=False)
+        enable_web_search = False
         verbose = _bool_env("CHATGPT_LOCAL_VERBOSE", default=False)
         verbose_obfuscation = _bool_env("CHATGPT_LOCAL_VERBOSE_OBFUSCATION", default=False)
 
@@ -328,10 +328,7 @@ def _merge_payload_settings(payload: Dict[str, Any], current: Dict[str, Any]) ->
             incoming.get("exposeReasoningModels", current["exposeReasoningModels"]),
             default=current["exposeReasoningModels"],
         ),
-        "enableWebSearch": _bool_value(
-            incoming.get("enableWebSearch", current["enableWebSearch"]),
-            default=current["enableWebSearch"],
-        ),
+        "enableWebSearch": False,
         "verbose": _bool_value(incoming.get("verbose", current["verbose"]), default=current["verbose"]),
         "verboseObfuscation": _bool_value(
             incoming.get("verboseObfuscation", current["verboseObfuscation"]),
@@ -374,7 +371,7 @@ def _apply_settings(settings: Dict[str, Any], *, app=None, persist: bool) -> Dic
     os.environ["CHATGPT_LOCAL_REASONING_SUMMARY"] = merged["reasoningSummary"]
     os.environ["CHATGPT_LOCAL_REASONING_COMPAT"] = merged["reasoningCompat"]
     os.environ["CHATGPT_LOCAL_EXPOSE_REASONING_MODELS"] = "1" if merged["exposeReasoningModels"] else "0"
-    os.environ["CHATGPT_LOCAL_ENABLE_WEB_SEARCH"] = "1" if merged["enableWebSearch"] else "0"
+    os.environ["CHATGPT_LOCAL_ENABLE_WEB_SEARCH"] = "0"
     os.environ["CHATGPT_LOCAL_VERBOSE"] = "1" if merged["verbose"] else "0"
     os.environ["CHATGPT_LOCAL_VERBOSE_OBFUSCATION"] = "1" if merged["verboseObfuscation"] else "0"
 
@@ -391,7 +388,7 @@ def _apply_settings(settings: Dict[str, Any], *, app=None, persist: bool) -> Dic
         runtime_app.config["REASONING_SUMMARY"] = merged["reasoningSummary"]
         runtime_app.config["REASONING_COMPAT"] = merged["reasoningCompat"]
         runtime_app.config["EXPOSE_REASONING_MODELS"] = merged["exposeReasoningModels"]
-        runtime_app.config["DEFAULT_WEB_SEARCH"] = merged["enableWebSearch"]
+        runtime_app.config["DEFAULT_WEB_SEARCH"] = False
         runtime_app.config["VERBOSE"] = merged["verbose"]
         runtime_app.config["VERBOSE_OBFUSCATION"] = merged["verboseObfuscation"]
 

@@ -30,7 +30,6 @@ const EMPTY_SETTINGS = {
   reasoningSummary: 'auto',
   reasoningCompat: 'think-tags',
   exposeReasoningModels: false,
-  enableWebSearch: false,
   verbose: false,
   verboseObfuscation: false,
   httpProxy: '',
@@ -441,19 +440,6 @@ export default function SettingsChatCoreRuntime() {
                           checked={Boolean(settings.exposeReasoningModels)}
                           onChange={(value) =>
                             handleSettingChange('exposeReasoningModels', value)
-                          }
-                        />
-                      </div>
-                    </div>
-                  </Col>
-                  <Col xs={24} sm={12} md={8}>
-                    <div style={{ marginBottom: 12 }}>
-                      <Text>默认开启 Web Search</Text>
-                      <div>
-                        <Switch
-                          checked={Boolean(settings.enableWebSearch)}
-                          onChange={(value) =>
-                            handleSettingChange('enableWebSearch', value)
                           }
                         />
                       </div>
