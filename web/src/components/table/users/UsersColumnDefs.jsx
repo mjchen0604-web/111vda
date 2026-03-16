@@ -288,6 +288,13 @@ const renderOperations = (
       >
         {t('降级')}
       </Button>
+      <Button
+        type='danger'
+        size='small'
+        onClick={() => showDeleteModal(record)}
+      >
+        {t('娉ㄩ攢')}
+      </Button>
       <Dropdown menu={moreMenu} trigger='click' position='bottomRight'>
         <Button type='tertiary' size='small' icon={<IconMore />} />
       </Dropdown>

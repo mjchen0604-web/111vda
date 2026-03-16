@@ -295,6 +295,19 @@ func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
+func AdminDeleteSubscriptionPlan(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if id <= 0 {
+		common.ApiErrorMsg(c, "无效的ID")
+		return
+	}
+	if err := model.AdminDeleteSubscriptionPlan(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}
+
 type AdminBindSubscriptionRequest struct {
 	UserId int `json:"user_id"`
 	PlanId int `json:"plan_id"`

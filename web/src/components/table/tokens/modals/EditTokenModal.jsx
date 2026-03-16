@@ -41,6 +41,7 @@ import {
   Form,
   Col,
   Row,
+  Select,
 } from '@douyinfe/semi-ui';
 import {
   IconCreditCard,
@@ -49,6 +50,7 @@ import {
   IconClose,
   IconKey,
 } from '@douyinfe/semi-icons';
+import { Clock, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../../context/Status';
 
@@ -68,7 +70,12 @@ const EditTokenModal = (props) => {
     name: '',
     remain_quota: 0,
     expired_time: -1,
+    validity_unit: 'month',
+    validity_value: 1,
+    validity_custom_seconds: 0,
     unlimited_quota: true,
+    quota_reset_period: 'never',
+    quota_reset_custom_seconds: 0,
     model_limits_enabled: false,
     model_limits: [],
     allow_ips: '',
@@ -95,6 +102,37 @@ const EditTokenModal = (props) => {
     } else {
       formApiRef.current.setValue('expired_time', -1);
     }
+  };
+
+  const setExpiredTimeBySeconds = (seconds) => {
+    if (!formApiRef.current) return;
+    if (!seconds || seconds <= 0) {
+      formApiRef.current.setValue('expired_time', -1);
+      return;
+    }
+    const timestamp = Math.floor(Date.now() / 1000) + seconds;
+    formApiRef.current.setValue('expired_time', timestamp2string(timestamp));
+  };
+
+  const applyValiditySettings = () => {
+    const values = formApiRef.current?.getValues?.();
+    if (!values) return;
+    const unit = values.validity_unit || 'month';
+    const rawValue =
+      unit === 'custom'
+        ? parseInt(values.validity_custom_seconds, 10) || 0
+        : parseInt(values.validity_value, 10) || 0;
+    if (rawValue <= 0) {
+      showError(t('请输入有效期数值'));
+      return;
+    }
+    let seconds = 0;
+    if (unit === 'year') seconds = rawValue * 365 * 24 * 60 * 60;
+    else if (unit === 'month') seconds = rawValue * 30 * 24 * 60 * 60;
+    else if (unit === 'day') seconds = rawValue * 24 * 60 * 60;
+    else if (unit === 'hour') seconds = rawValue * 60 * 60;
+    else seconds = rawValue;
+    setExpiredTimeBySeconds(seconds);
   };
 
   const loadModels = async () => {
@@ -208,7 +246,13 @@ const EditTokenModal = (props) => {
   const submit = async (values) => {
     setLoading(true);
     if (isEdit) {
-      let { tokenCount: _tc, ...localInputs } = values;
+      let {
+        tokenCount: _tc,
+        validity_unit: _vu,
+        validity_value: _vv,
+        validity_custom_seconds: _vcs,
+        ...localInputs
+      } = values;
       localInputs.remain_quota = parseInt(localInputs.remain_quota);
       if (localInputs.expired_time !== -1) {
         let time = Date.parse(localInputs.expired_time);
@@ -237,7 +281,13 @@ const EditTokenModal = (props) => {
       const count = parseInt(values.tokenCount, 10) || 1;
       let successCount = 0;
       for (let i = 0; i < count; i++) {
-        let { tokenCount: _tc, ...localInputs } = values;
+        let {
+          tokenCount: _tc,
+          validity_unit: _vu,
+          validity_value: _vv,
+          validity_custom_seconds: _vcs,
+          ...localInputs
+        } = values;
         const baseName =
           values.name.trim() === '' ? 'default' : values.name.trim();
         if (i !== 0 || values.name.trim() === '') {
@@ -475,7 +525,59 @@ const EditTokenModal = (props) => {
               </Card>
 
               {/* 额度设置 */}
-              <Card className='!rounded-2xl shadow-sm border-0'>
+              <Card className='!rounded-2xl shadow-sm border-0 mt-4'>
+                <div className='flex items-center mb-2'>
+                  <Avatar size='small' color='green' className='mr-2 shadow-md'>
+                    <Clock size={16} />
+                  </Avatar>
+                  <div>
+                    <Text className='text-lg font-medium'>{t('有效期设置')}</Text>
+                    <div className='text-xs text-gray-600'>{t('配置令牌的有效时长')}</div>
+                  </div>
+                </div>
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <Form.Select field='validity_unit' label={t('有效期单位')}>
+                      <Select.Option value='year'>{t('年')}</Select.Option>
+                      <Select.Option value='month'>{t('月')}</Select.Option>
+                      <Select.Option value='day'>{t('天')}</Select.Option>
+                      <Select.Option value='hour'>{t('小时')}</Select.Option>
+                      <Select.Option value='custom'>{t('自定义秒')}</Select.Option>
+                    </Form.Select>
+                  </Col>
+                  <Col span={12}>
+                    {values.validity_unit === 'custom' ? (
+                      <Form.InputNumber
+                        field='validity_custom_seconds'
+                        label={t('自定义秒数')}
+                        min={1}
+                        precision={0}
+                        style={{ width: '100%' }}
+                      />
+                    ) : (
+                      <Form.InputNumber
+                        field='validity_value'
+                        label={t('有效期数值')}
+                        min={1}
+                        precision={0}
+                        style={{ width: '100%' }}
+                      />
+                    )}
+                  </Col>
+                  <Col span={24}>
+                    <Space wrap>
+                      <Button theme='light' type='primary' onClick={applyValiditySettings}>
+                        应用到过期时间
+                      </Button>
+                      <Button theme='light' type='tertiary' onClick={() => setExpiredTimeBySeconds(0)}>
+                        {t('永不过期')}
+                      </Button>
+                    </Space>
+                  </Col>
+                </Row>
+              </Card>
+
+              <Card className='!rounded-2xl shadow-sm border-0 mt-4'>
                 <div className='flex items-center mb-2'>
                   <Avatar size='small' color='green' className='mr-2 shadow-md'>
                     <IconCreditCard size={16} />
@@ -525,7 +627,40 @@ const EditTokenModal = (props) => {
               </Card>
 
               {/* 访问限制 */}
-              <Card className='!rounded-2xl shadow-sm border-0'>
+              <Card className='!rounded-2xl shadow-sm border-0 mt-4'>
+                <div className='flex items-center mb-2'>
+                  <Avatar size='small' color='orange' className='mr-2 shadow-md'>
+                    <RefreshCw size={16} />
+                  </Avatar>
+                  <div>
+                    <Text className='text-lg font-medium'>{t('额度重置')}</Text>
+                    <div className='text-xs text-gray-600'>{t('支持周期性重置令牌额度')}</div>
+                  </div>
+                </div>
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <Form.Select field='quota_reset_period' label={t('重置周期')}>
+                      <Select.Option value='never'>{t('不重置')}</Select.Option>
+                      <Select.Option value='daily'>{t('每天')}</Select.Option>
+                      <Select.Option value='weekly'>{t('每周')}</Select.Option>
+                      <Select.Option value='monthly'>{t('每月')}</Select.Option>
+                      <Select.Option value='custom'>{t('自定义秒')}</Select.Option>
+                    </Form.Select>
+                  </Col>
+                  <Col span={12}>
+                    <Form.InputNumber
+                      field='quota_reset_custom_seconds'
+                      label={t('自定义秒数')}
+                      min={0}
+                      precision={0}
+                      disabled={values.quota_reset_period !== 'custom'}
+                      style={{ width: '100%' }}
+                    />
+                  </Col>
+                </Row>
+              </Card>
+
+              <Card className='!rounded-2xl shadow-sm border-0 mt-4'>
                 <div className='flex items-center mb-2'>
                   <Avatar
                     size='small'

@@ -89,13 +89,13 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 	}
 }
 
-func TestResponsesRequestToChatCompletionsRequestRejectsBuiltInSearchTools(t *testing.T) {
+func TestResponsesRequestToChatCompletionsRequestStripsBuiltInSearchTools(t *testing.T) {
 	toolChoice, _ := common.Marshal("auto")
 	tools, _ := common.Marshal([]map[string]any{
 		{"type": "web_search"},
 		{
-			"type": "function",
-			"name": "mcp__CherryHub__list",
+			"type":       "function",
+			"name":       "mcp__CherryHub__list",
 			"parameters": map[string]any{"type": "object"},
 		},
 	})
@@ -108,17 +108,18 @@ func TestResponsesRequestToChatCompletionsRequestRejectsBuiltInSearchTools(t *te
 		},
 	})
 
-	_, err := responsesRequestToChatCompletionsRequest(dto.OpenAIResponsesRequest{
+	chatReq, err := responsesRequestToChatCompletionsRequest(dto.OpenAIResponsesRequest{
 		Model:      "gpt-5.4",
 		Input:      input,
 		ToolChoice: toolChoice,
 		Tools:      tools,
 	})
-	if err == nil {
-		t.Fatal("expected built-in web_search to be rejected")
-	}
-	if !strings.Contains(err.Error(), "built-in web_search is disabled by this server") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	toolsPayload, ok := chatReq["tools"].([]any)
+	if !ok || len(toolsPayload) != 1 {
+		t.Fatalf("expected only non-built-in tool to remain, got %#v", chatReq["tools"])
 	}
 }
 

@@ -198,7 +198,7 @@ func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest
 					toolType = "function"
 				}
 				if toolType == "web_search" || toolType == "web_search_preview" {
-					return nil, fmt.Errorf("built-in web_search is disabled by this server; use tool-based search instead")
+					continue
 				}
 				tool := dto.ToolCallRequest{
 					Type: toolType,
@@ -677,9 +677,9 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response.function_call_arguments.done"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
 		if !sendEvent(dto.ResponsesStreamResponse{
-			Type: "response.output_item.done",
+			Type:        "response.output_item.done",
 			OutputIndex: common.GetPointer(idx),
-			Item: &item,
+			Item:        &item,
 		}) {
 			return nil, types.NewOpenAIError(fmt.Errorf("failed to write response.output_item.done"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}

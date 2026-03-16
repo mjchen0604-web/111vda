@@ -220,6 +220,19 @@ def _resolve_web_search_mode(
     return "disabled"
 
 
+def _strip_builtin_search_tools(tools_payload: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], bool]:
+    sanitized: List[Dict[str, Any]] = []
+    removed = False
+    for tool in tools_payload or []:
+        if not isinstance(tool, dict):
+            continue
+        if tool.get("type") in ("web_search", "web_search_preview"):
+            removed = True
+            continue
+        sanitized.append(tool)
+    return sanitized, removed
+
+
 def _should_retry_nonstream_candidate(error_info: Dict[str, Any] | None) -> bool:
     if not isinstance(error_info, dict):
         return False
@@ -541,20 +554,7 @@ def chat_completions() -> Response:
     include_usage = bool(stream_options.get("include_usage", False))
 
     raw_tools_payload = payload.get("tools") if isinstance(payload.get("tools"), list) else []
-    if any(
-        isinstance(_t, dict) and _t.get("type") in ("web_search", "web_search_preview")
-        for _t in raw_tools_payload
-    ):
-        err = {
-            "error": {
-                "message": "Built-in web_search is disabled by this server; use tool-based search instead",
-                "code": "WEB_SEARCH_DISABLED",
-            }
-        }
-        if verbose:
-            _log_json("OUT POST /v1/chat/completions", err)
-        return jsonify(err), 400
-    tools_responses = convert_tools_chat_to_responses(raw_tools_payload)
+    raw_tools_payload, stripped_builtin_search = _strip_builtin_search_tools(raw_tools_payload)
     tool_choice = payload.get("tool_choice", "auto")
     if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
         function_block = tool_choice.get("function")
@@ -573,29 +573,13 @@ def chat_completions() -> Response:
         }
     parallel_tool_calls = bool(payload.get("parallel_tool_calls", False))
     responses_tools_payload = payload.get("responses_tools") if isinstance(payload.get("responses_tools"), list) else []
-    if responses_tools_payload:
-        err = {
-            "error": {
-                "message": "Built-in web_search is disabled by this server; use tool-based search instead",
-                "code": "WEB_SEARCH_DISABLED",
-            }
-        }
-        if verbose:
-            _log_json("OUT POST /v1/chat/completions", err)
-        return jsonify(err), 400
+    responses_tools_payload, stripped_responses_builtin_search = _strip_builtin_search_tools(responses_tools_payload)
+    tools_responses = convert_tools_chat_to_responses(list(raw_tools_payload) + list(responses_tools_payload))
     builtin_search_tools: List[Dict[str, Any]] = []
     had_builtin_search_tools = False
     responses_tool_choice = payload.get("responses_tool_choice")
-    if isinstance(responses_tool_choice, str) and responses_tool_choice.strip():
-        err = {
-            "error": {
-                "message": "Built-in web_search is disabled by this server; use tool-based search instead",
-                "code": "WEB_SEARCH_DISABLED",
-            }
-        }
-        if verbose:
-            _log_json("OUT POST /v1/chat/completions", err)
-        return jsonify(err), 400
+    if stripped_builtin_search or stripped_responses_builtin_search:
+        responses_tool_choice = None
 
     input_items = convert_chat_messages_to_responses_input(messages)
     if not input_items and isinstance(payload.get("prompt"), str) and payload.get("prompt").strip():

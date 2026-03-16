@@ -187,6 +187,11 @@ func AddToken(c *gin.Context) {
 			return
 		}
 	}
+	token.QuotaResetPeriod = model.NormalizeResetPeriod(token.QuotaResetPeriod)
+	if token.QuotaResetPeriod == model.SubscriptionResetCustom && token.QuotaResetCustomSeconds <= 0 {
+		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
+		return
+	}
 	// 检查用户令牌数量是否已达上限
 	maxTokens := operation_setting.GetMaxUserTokens()
 	count, err := model.CountUserTokens(c.GetInt("id"))
@@ -208,20 +213,23 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	cleanToken := model.Token{
-		UserId:             c.GetInt("id"),
-		Name:               token.Name,
-		Key:                key,
-		CreatedTime:        common.GetTimestamp(),
-		AccessedTime:       common.GetTimestamp(),
-		ExpiredTime:        token.ExpiredTime,
-		RemainQuota:        token.RemainQuota,
-		UnlimitedQuota:     token.UnlimitedQuota,
-		ModelLimitsEnabled: token.ModelLimitsEnabled,
-		ModelLimits:        token.ModelLimits,
-		AllowIps:           token.AllowIps,
-		Group:              token.Group,
-		CrossGroupRetry:    token.CrossGroupRetry,
+		UserId:                  c.GetInt("id"),
+		Name:                    token.Name,
+		Key:                     key,
+		CreatedTime:             common.GetTimestamp(),
+		AccessedTime:            common.GetTimestamp(),
+		ExpiredTime:             token.ExpiredTime,
+		RemainQuota:             token.RemainQuota,
+		UnlimitedQuota:          token.UnlimitedQuota,
+		ModelLimitsEnabled:      token.ModelLimitsEnabled,
+		ModelLimits:             token.ModelLimits,
+		AllowIps:                token.AllowIps,
+		Group:                   token.Group,
+		CrossGroupRetry:         token.CrossGroupRetry,
+		QuotaResetPeriod:        token.QuotaResetPeriod,
+		QuotaResetCustomSeconds: token.QuotaResetCustomSeconds,
 	}
+	model.PrepareTokenResetFields(&cleanToken, common.GetTimestamp())
 	err = cleanToken.Insert()
 	if err != nil {
 		common.ApiError(c, err)
@@ -271,6 +279,11 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
+	token.QuotaResetPeriod = model.NormalizeResetPeriod(token.QuotaResetPeriod)
+	if token.QuotaResetPeriod == model.SubscriptionResetCustom && token.QuotaResetCustomSeconds <= 0 {
+		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
+		return
+	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -299,6 +312,10 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		cleanToken.QuotaResetPeriod = token.QuotaResetPeriod
+		cleanToken.QuotaResetCustomSeconds = token.QuotaResetCustomSeconds
+		cleanToken.QuotaResetAmount = token.RemainQuota
+		model.PrepareTokenResetFields(cleanToken, common.GetTimestamp())
 	}
 	err = cleanToken.Update()
 	if err != nil {

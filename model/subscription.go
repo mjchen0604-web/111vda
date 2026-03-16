@@ -351,6 +351,17 @@ func GetSubscriptionPlanById(id int) (*SubscriptionPlan, error) {
 	return getSubscriptionPlanByIdTx(nil, id)
 }
 
+func AdminDeleteSubscriptionPlan(planId int) error {
+	if planId <= 0 {
+		return errors.New("invalid plan id")
+	}
+	if err := DB.Where("id = ?", planId).Delete(&SubscriptionPlan{}).Error; err != nil {
+		return err
+	}
+	InvalidateSubscriptionPlanCache(planId)
+	return nil
+}
+
 func getSubscriptionPlanByIdTx(tx *gorm.DB, id int) (*SubscriptionPlan, error) {
 	if id <= 0 {
 		return nil, errors.New("invalid plan id")

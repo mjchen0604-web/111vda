@@ -308,33 +308,33 @@ def ollama_chat() -> Response:
         stream_req = True
     stream_req = bool(stream_req)
     tools_req = payload.get("tools") if isinstance(payload.get("tools"), list) else []
-    if any(
-        isinstance(_t, dict) and _t.get("type") in ("web_search", "web_search_preview")
-        for _t in tools_req
-    ):
-        err = {"error": "Built-in web_search is disabled by this server; use tool-based search instead"}
-        if verbose:
-            _log_json("OUT POST /api/chat", err)
-        return jsonify(err), 400
-    tools_responses = convert_tools_chat_to_responses(normalize_ollama_tools(tools_req))
+    filtered_tools_req = []
+    stripped_builtin_search = False
+    for _t in tools_req:
+        if isinstance(_t, dict) and _t.get("type") in ("web_search", "web_search_preview"):
+            stripped_builtin_search = True
+            continue
+        filtered_tools_req.append(_t)
+    tools_req = filtered_tools_req
     tool_choice = payload.get("tool_choice", "auto")
     parallel_tool_calls = bool(payload.get("parallel_tool_calls", False))
 
     # Passthrough Responses API tools (web_search) via ChatMock extension fields
     had_responses_tools = False
     rt_payload = payload.get("responses_tools") if isinstance(payload.get("responses_tools"), list) else []
-    if rt_payload:
-        err = {"error": "Built-in web_search is disabled by this server; use tool-based search instead"}
-        if verbose:
-            _log_json("OUT POST /api/chat", err)
-        return jsonify(err), 400
+    filtered_rt_payload = []
+    for _t in rt_payload:
+        if isinstance(_t, dict) and _t.get("type") in ("web_search", "web_search_preview"):
+            continue
+        filtered_rt_payload.append(_t)
+    rt_payload = filtered_rt_payload
+    tools_responses = convert_tools_chat_to_responses(
+        normalize_ollama_tools(list(tools_req) + list(rt_payload))
+    )
 
     rtc = payload.get("responses_tool_choice")
-    if isinstance(rtc, str) and rtc.strip():
-        err = {"error": "Built-in web_search is disabled by this server; use tool-based search instead"}
-        if verbose:
-            _log_json("OUT POST /api/chat", err)
-        return jsonify(err), 400
+    if stripped_builtin_search or rt_payload:
+        rtc = None
 
     if not isinstance(model, str) or not isinstance(messages, list) or not messages:
         err = {"error": "Invalid request format"}
