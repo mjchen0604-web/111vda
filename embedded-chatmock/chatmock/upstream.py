@@ -90,11 +90,7 @@ def _normalize_service_tier(service_tier: str | None) -> str | None:
 
 
 def _prefers_codex_app_server(model: str, service_tier: str | None) -> bool:
-    normalized_tier = _normalize_service_tier(service_tier)
-    if normalized_tier in ("fast", "flex"):
-        return True
-    _, _, alias_service_tier = split_model_alias(model)
-    return alias_service_tier in ("fast", "flex")
+    return False
 
 
 def resolve_upstream_mode(configured_mode: str, model: str, service_tier: str | None) -> str:
@@ -103,8 +99,6 @@ def resolve_upstream_mode(configured_mode: str, model: str, service_tier: str | 
         normalized_mode = "auto"
     if normalized_mode != "auto":
         return normalized_mode
-    if _prefers_codex_app_server(model, service_tier):
-        return "codex-app-server"
     return "chatgpt-backend"
 
 
@@ -283,16 +277,6 @@ def _start_chatgpt_backend_request(
     verbose: bool = False,
 ):
     normalized_service_tier = _normalize_service_tier(service_tier)
-    if normalized_service_tier in ("fast", "flex"):
-        return None, build_openai_error_response(
-            build_error_info(
-                source="chatmock",
-                phase="config",
-                raw_status=400,
-                raw_message=f"requested performance mode '{normalized_service_tier}' requires accelerator upstream",
-                raw_body={"message": f"requested performance mode '{normalized_service_tier}' requires accelerator upstream"},
-            )
-        )
 
     auth_candidates = get_effective_chatgpt_auth_candidates(ensure_fresh=True)
     if not auth_candidates:
@@ -339,6 +323,8 @@ def _start_chatgpt_backend_request(
         "stream": True,
         "prompt_cache_key": session_id,
     }
+    if normalized_service_tier is not None:
+        responses_payload["service_tier"] = normalized_service_tier
     if include:
         responses_payload["include"] = include
 

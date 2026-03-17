@@ -360,8 +360,8 @@ def main() -> None:
         default=(os.getenv("CHATGPT_LOCAL_UPSTREAM") or UPSTREAM_MODE_DEFAULT).strip().lower(),
         help=(
             "Legacy compatibility knob. "
-            "Normal requests always use IIfyI. "
-            "Requests with service_tier 'fast' or 'flex' always use IIfyl."
+            "Auto now uses direct ChatGPT Responses passthrough. "
+            "Use 'codex-app-server' only to force the legacy accelerator path."
         ),
     )
     p_serve.add_argument(
@@ -376,7 +376,7 @@ def main() -> None:
         default=(os.getenv("CHATGPT_LOCAL_SERVICE_TIER") or "").strip() or None,
         help=(
             "Optional service tier override. "
-            "Use 'fast' or 'flex'; both force IIfyl for that request. "
+            "Use 'fast' or 'flex'; both are passed through to the upstream Responses API. "
             "Omit to leave unset."
         ),
     )
