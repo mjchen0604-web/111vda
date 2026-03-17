@@ -18,6 +18,7 @@ from .reasoning import (
     parse_fast_mode,
     public_model_name,
     public_service_tier_name,
+    presented_service_tier_name,
 )
 from .surface_names import public_upstream_name
 from .upstream_errors import (
@@ -29,7 +30,7 @@ from .upstream_errors import (
     normalized_error_payload,
     should_retry_next_candidate,
 )
-from .upstream import normalize_model_name, resolve_upstream_mode, start_upstream_request
+from .upstream import normalize_model_name, start_upstream_request
 from .thread_sessions import resolve_thread_session_state
 from .utils import (
     RetryableStreamError,
@@ -90,7 +91,7 @@ def _log_fast_probe(
     extra: Dict[str, Any] | None = None,
 ) -> None:
     requested_model_text = str(requested_model or "").lower()
-    should_log = bool(requested_service_tier) or ("-fast" in requested_model_text) or ("-lightning" in requested_model_text) or selected_mode == "codex-app-server"
+    should_log = bool(requested_service_tier) or ("-fast" in requested_model_text)
     if not should_log:
         return
     payload: Dict[str, Any] = {
@@ -139,22 +140,11 @@ def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | N
     system_prompt = payload.get("system_prompt")
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt.strip()
-    return None
+    return ""
 
 
 def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_tier: str | None = None) -> int:
-    configured_mode = str(current_app.config.get("UPSTREAM_MODE") or "auto").strip().lower()
-    selected_mode = resolve_upstream_mode(configured_mode, model or "", service_tier)
-    if is_stream and selected_mode != "codex-app-server":
-        return 1
-    if selected_mode != "codex-app-server":
-        return 1
-    manager = current_app.config.get("CODEX_APP_SERVER_MANAGER")
-    if manager is not None and hasattr(manager, "get_request_candidates"):
-        try:
-            return max(1, len(manager.get_request_candidates() or []))
-        except Exception:
-            return 1
+    _ = is_stream, model, service_tier
     return 1
 
 
@@ -242,10 +232,7 @@ def _strip_builtin_search_tools(tools_payload: List[Dict[str, Any]]) -> tuple[Li
 def _should_retry_nonstream_candidate(error_info: Dict[str, Any] | None) -> bool:
     if not isinstance(error_info, dict):
         return False
-    if should_retry_next_candidate(error_info):
-        return True
-    source = str(error_info.get("source") or "").strip().lower()
-    return source == "codex-app-server"
+    return should_retry_next_candidate(error_info)
 
 
 def _consume_chat_completion_nonstream(
@@ -605,11 +592,7 @@ def chat_completions() -> Response:
         allowed_efforts=allowed_efforts_for_model(model),
     )
     bridge_instructions = _resolve_bridge_instructions(model, payload)
-    selected_mode = resolve_upstream_mode(
-        str(current_app.config.get("UPSTREAM_MODE") or "auto").strip().lower(),
-        model or "",
-        service_tier,
-    )
+    selected_mode = "chatgpt-backend"
     _log_fast_probe(
         "start",
         requested_model=requested_model,
@@ -859,8 +842,9 @@ def chat_completions() -> Response:
         ],
         **({"usage": usage_obj} if usage_obj else {}),
     }
-    if observed_service_tier:
-        completion["service_tier"] = public_service_tier_name(observed_service_tier)
+    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
+    if presented_service_tier:
+        completion["service_tier"] = presented_service_tier
     if verbose:
         _log_json("OUT POST /v1/chat/completions", completion)
     resp = make_response(jsonify(completion), upstream.status_code)
@@ -927,11 +911,7 @@ def completions() -> Response:
         allowed_efforts=allowed_efforts_for_model(model),
     )
     bridge_instructions = _resolve_bridge_instructions(model, payload)
-    selected_mode = resolve_upstream_mode(
-        str(current_app.config.get("UPSTREAM_MODE") or "auto").strip().lower(),
-        model or "",
-        service_tier,
-    )
+    selected_mode = "chatgpt-backend"
     _log_fast_probe(
         "start",
         requested_model=requested_model,
@@ -1147,8 +1127,9 @@ def completions() -> Response:
         ],
         **({"usage": usage_obj} if usage_obj else {}),
     }
-    if observed_service_tier:
-        completion["service_tier"] = public_service_tier_name(observed_service_tier)
+    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
+    if presented_service_tier:
+        completion["service_tier"] = presented_service_tier
     if verbose:
         _log_json("OUT POST /v1/completions", completion)
     resp = make_response(jsonify(completion), upstream.status_code)

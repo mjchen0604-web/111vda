@@ -9,7 +9,7 @@ import webbrowser
 from datetime import datetime
 
 from .app import create_app
-from .config import CLIENT_ID_DEFAULT, CODEX_APP_SERVER_URL_DEFAULT, UPSTREAM_MODE_DEFAULT
+from .config import CLIENT_ID_DEFAULT
 from .limits import RateLimitWindow, compute_reset_at, load_rate_limit_snapshot
 from .oauth import OAuthHTTPServer, OAuthHandler, REQUIRED_PORT, URL_BASE
 from .utils import eprint, get_home_dir, load_chatgpt_tokens, parse_jwt_claims, read_auth_file
@@ -271,8 +271,6 @@ def cmd_serve(
     expose_reasoning_models: bool,
     default_web_search: bool,
     service_tier: str | None,
-    upstream_mode: str,
-    codex_app_server_url: str,
 ) -> int:
     app = create_app(
         verbose=verbose,
@@ -284,8 +282,6 @@ def cmd_serve(
         expose_reasoning_models=expose_reasoning_models,
         default_web_search=default_web_search,
         service_tier=service_tier,
-        upstream_mode=upstream_mode,
-        codex_app_server_url=codex_app_server_url,
     )
 
     app.run(host=host, debug=False, use_reloader=False, port=port, threaded=True)
@@ -355,28 +351,12 @@ def main() -> None:
         ),
     )
     p_serve.add_argument(
-        "--upstream",
-        choices=["auto", "chatgpt-backend", "codex-app-server"],
-        default=(os.getenv("CHATGPT_LOCAL_UPSTREAM") or UPSTREAM_MODE_DEFAULT).strip().lower(),
-        help=(
-            "Legacy compatibility knob. "
-            "Auto now uses direct ChatGPT Responses passthrough. "
-            "Use 'codex-app-server' only to force the legacy accelerator path."
-        ),
-    )
-    p_serve.add_argument(
-        "--codex-app-server-url",
-        dest="codex_app_server_url",
-        default=(os.getenv("CHATGPT_LOCAL_CODEX_APP_SERVER_URL") or CODEX_APP_SERVER_URL_DEFAULT).strip(),
-        help="WebSocket URL for the local IIfyl path (default: ws://127.0.0.1:8787).",
-    )
-    p_serve.add_argument(
         "--service-tier",
         dest="service_tier",
         default=(os.getenv("CHATGPT_LOCAL_SERVICE_TIER") or "").strip() or None,
         help=(
             "Optional service tier override. "
-            "Use 'fast' or 'flex'; both are passed through to the upstream Responses API. "
+            "Use 'priority', 'fast', or 'flex'; the value is forwarded to ChatGPT backend. "
             "Omit to leave unset."
         ),
     )
@@ -402,8 +382,6 @@ def main() -> None:
                 expose_reasoning_models=args.expose_reasoning_models,
                 default_web_search=args.enable_web_search,
                 service_tier=args.service_tier,
-                upstream_mode=args.upstream,
-                codex_app_server_url=args.codex_app_server_url,
             )
         )
     elif args.command == "info":
@@ -415,7 +393,7 @@ def main() -> None:
         if not access_token or not id_token:
             print("👤 Account")
             print("  • Not signed in")
-            print("  • Run: python3 chatmock.py login")
+            print("  • Configure credentials under CHATGPT_LOCAL_HOME")
             print("")
             _print_usage_limits_block()
             sys.exit(0)

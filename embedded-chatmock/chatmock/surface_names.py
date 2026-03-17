@@ -5,7 +5,6 @@ from typing import Any
 
 _UPSTREAM_PUBLIC_NAMES = {
     "chatgpt-backend": "IIfyI",
-    "codex-app-server": "IIfyl",
 }
 
 

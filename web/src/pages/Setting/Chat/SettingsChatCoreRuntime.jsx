@@ -21,11 +21,7 @@ const EMPTY_SETTINGS = {
   routingStrategy: 'round-robin',
   requestRetry: 0,
   maxRetryInterval: 5,
-  upstreamMode: 'auto',
-  codexAppServerUrl: 'ws://127.0.0.1:8787',
   serviceTier: '',
-  manageCodexAppServer: true,
-  autoStartCodexAppServer: true,
   reasoningEffort: 'minimal',
   reasoningSummary: 'auto',
   reasoningCompat: 'think-tags',
@@ -67,15 +63,6 @@ const formatAccountStatus = (record) => {
     return '-';
   }
 
-  const fastStatus = String(record.fast_status || '').trim();
-  const fastListening = Boolean(record.fast_listening);
-  const fastLastError = String(
-    record.fast_last_request_error || record.fast_last_error || '',
-  ).trim();
-  const fastCooldownRemaining = Number(record.fast_cooldown_remaining || 0);
-  const fastUnlockAt = String(record.fast_unlock_at || '').trim();
-  const fastRequestFailures = Number(record.fast_request_failures || 0);
-
   const status = String(record.status || '').trim();
   const lastStatus = record.last_status;
   const lastClassification = String(record.last_classification || '').trim();
@@ -84,54 +71,27 @@ const formatAccountStatus = (record) => {
   const unlockAt = String(record.unlock_at || '').trim();
 
   const parts = [];
-  const standardParts = [];
-  const fastParts = [];
-
-  if (fastStatus) {
-    fastParts.push(
-      fastListening ? `fast:${fastStatus}` : `fast:${fastStatus}(not-listening)`,
-    );
-  }
-  if (fastCooldownRemaining > 0) {
-    fastParts.push(`cooldown ${fastCooldownRemaining}s`);
-  }
-  if (fastUnlockAt) {
-    fastParts.push(`until ${fastUnlockAt}`);
-  }
-  if (Number.isFinite(fastRequestFailures) && fastRequestFailures > 0) {
-    fastParts.push(`failures ${fastRequestFailures}`);
-  }
-  if (fastLastError) {
-    fastParts.push(fastLastError);
-  }
 
   if (Number.isFinite(lastStatus) && lastStatus > 0) {
-    standardParts.push(`std:HTTP ${lastStatus}`);
+    parts.push(`HTTP ${lastStatus}`);
   } else if (status) {
-    standardParts.push(`std:${status}`);
+    parts.push(status);
   }
 
   if (lastClassification && lastClassification !== 'ready') {
-    standardParts.push(lastClassification);
+    parts.push(lastClassification);
   }
 
   if (cooldownRemaining > 0) {
-    standardParts.push(`cooldown ${cooldownRemaining}s`);
+    parts.push(`cooldown ${cooldownRemaining}s`);
   }
 
   if (unlockAt) {
-    standardParts.push(`until ${unlockAt}`);
+    parts.push(`until ${unlockAt}`);
   }
 
   if (lastError) {
-    standardParts.push(lastError);
-  }
-
-  if (fastParts.length > 0) {
-    parts.push(fastParts.join(' '));
-  }
-  if (standardParts.length > 0) {
-    parts.push(standardParts.join(' '));
+    parts.push(lastError);
   }
 
   return parts.length > 0 ? parts.join(' | ') : '-';
@@ -314,7 +274,7 @@ export default function SettingsChatCoreRuntime() {
           <Banner
             type='info'
             closeIcon={null}
-            description='这里管理容器内嵌 chat 的账号池、上游模式和运行参数。外部客户端继续只连接 II.fy，对内由本服务转到完整 chat 内核。'
+            description='这里管理容器内嵌 chat 的账号池和运行参数。外部客户端继续只连接 II.fy，对内统一转到 ChatGPT backend。'
             style={{ marginBottom: 16 }}
           />
 
@@ -367,30 +327,6 @@ export default function SettingsChatCoreRuntime() {
                       <Input
                         value={String(settings.maxRetryInterval ?? 5)}
                         onChange={(value) => handleSettingChange('maxRetryInterval', value)}
-                      />,
-                    )}
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    {controlBlock(
-                      '上游模式',
-                      <Select
-                        value='auto'
-                        optionList={selectOptions([
-                          {
-                            label: 'auto (标准请求走主路由，priority/flex 走高性能路由)',
-                            value: 'auto',
-                          },
-                        ])}
-                        onChange={() => handleSettingChange('upstreamMode', 'auto')}
-                      />,
-                    )}
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    {controlBlock(
-                      '高性能路由 URL',
-                      <Input
-                        value={settings.codexAppServerUrl || 'ws://127.0.0.1:8787'}
-                        onChange={(value) => handleSettingChange('codexAppServerUrl', value)}
                       />,
                     )}
                   </Col>
@@ -509,32 +445,6 @@ export default function SettingsChatCoreRuntime() {
                           checked={Boolean(settings.verboseObfuscation)}
                           onChange={(value) =>
                             handleSettingChange('verboseObfuscation', value)
-                          }
-                        />
-                      </div>
-                    </div>
-                  </Col>
-                  <Col xs={24} sm={12} md={8}>
-                    <div style={{ marginBottom: 12 }}>
-                      <Text>托管高性能内核</Text>
-                      <div>
-                        <Switch
-                          checked={Boolean(settings.manageCodexAppServer)}
-                          onChange={(value) =>
-                            handleSettingChange('manageCodexAppServer', value)
-                          }
-                        />
-                      </div>
-                    </div>
-                  </Col>
-                  <Col xs={24} sm={12} md={8}>
-                    <div style={{ marginBottom: 12 }}>
-                      <Text>自动启动高性能内核</Text>
-                      <div>
-                        <Switch
-                          checked={Boolean(settings.autoStartCodexAppServer)}
-                          onChange={(value) =>
-                            handleSettingChange('autoStartCodexAppServer', value)
                           }
                         />
                       </div>

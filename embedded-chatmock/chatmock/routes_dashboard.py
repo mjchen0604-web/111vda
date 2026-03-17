@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, current_app, jsonify, make_response, request, send_from_directory
 
-from .codex_app_server import read_codex_app_server_config
 from .utils import (
     get_chatgpt_auth_records,
     get_max_retry_interval_seconds,
@@ -191,10 +190,6 @@ def _discover_auth_files(root: Path | None = None) -> List[str]:
         return []
     files = [str(path) for path in sorted(base.glob("acc*/auth.json")) if path.is_file()]
     return _dedupe_paths(files)
-
-
-def _runtime_codex_manager():
-    return current_app.config.get("CODEX_APP_SERVER_MANAGER")
 
 
 def _settings_path() -> Path:
@@ -479,53 +474,23 @@ def _read_auth_payload(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _service_status() -> Dict[str, Any]:
-    manager = _runtime_codex_manager()
-    if manager is not None:
-        return manager.status()
-    return {"status": "unmanaged", "managed": False, "listening": False}
+    return {
+        "status": "chatgpt-backend",
+        "managed": False,
+        "listening": True,
+        "mode": "chatgpt-backend",
+        "raw": "chatgpt-backend",
+    }
 
 
 def _runtime_config_snapshot() -> Dict[str, Any]:
-    manager = _runtime_codex_manager()
-    candidate_url = ""
-    if manager is not None and hasattr(manager, "get_request_candidates"):
-        try:
-            candidates = list(manager.get_request_candidates() or [])
-            if candidates:
-                candidate_url = str(candidates[0].get("url") or "").strip()
-        except Exception:
-            candidate_url = ""
-    if not candidate_url:
-        service = _service_status()
-        instances = service.get("instances") if isinstance(service.get("instances"), list) else []
-        for item in instances:
-            if not isinstance(item, dict):
-                continue
-            if item.get("status") in ("running", "external"):
-                candidate_url = str(item.get("url") or "").strip()
-                if candidate_url:
-                    break
-        if not candidate_url:
-            candidate_url = str(service.get("url") or "").strip()
-    if not candidate_url:
-        return {}
-    try:
-        return read_codex_app_server_config(app_server_url=candidate_url, cwd=str(Path.cwd()))
-    except Exception as exc:
-        return {"error": str(exc), "url": candidate_url}
-
-
-def _fast_instance_map() -> Dict[str, Dict[str, Any]]:
-    service = _service_status()
-    instances = service.get("instances") if isinstance(service.get("instances"), list) else []
-    out: Dict[str, Dict[str, Any]] = {}
-    for item in instances:
-        if not isinstance(item, dict):
-            continue
-        label = str(item.get("label") or "").strip()
-        if label:
-            out[label] = item
-    return out
+    return {
+        "mode": "chatgpt-backend",
+        "routingStrategy": os.getenv("CHATGPT_LOCAL_ROUTING_STRATEGY", "round-robin"),
+        "requestRetry": get_request_retry_limit(),
+        "maxRetryInterval": get_max_retry_interval_seconds(),
+        "serviceTier": str(current_app.config.get("SERVICE_TIER") or ""),
+    }
 
 
 def _is_active_account_record(record: Dict[str, Any]) -> bool:
@@ -586,28 +551,6 @@ def dashboard_health():
 @dashboard_bp.get("/api/accounts")
 def dashboard_accounts():
     records = get_chatgpt_auth_records()
-    instance_map = _fast_instance_map()
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        source = str(record.get("source") or "")
-        parent_label = Path(source).parent.name.strip() if source else ""
-        instance = instance_map.get(parent_label) if parent_label else None
-        if isinstance(instance, dict):
-            record["fast_status"] = instance.get("status")
-            record["fast_listening"] = instance.get("listening")
-            record["fast_port"] = instance.get("port")
-            record["fast_url"] = instance.get("url")
-            record["fast_pid"] = instance.get("pid")
-            record["fast_cooldown_remaining"] = instance.get("cooldownRemaining")
-            record["fast_cooldown_until"] = instance.get("cooldownUntil")
-            record["fast_unlock_at"] = instance.get("unlockAt")
-            record["fast_request_failures"] = instance.get("requestFailures")
-            record["fast_request_count"] = instance.get("requestCount")
-            record["fast_request_successes"] = instance.get("requestSuccesses")
-            record["fast_last_request_error"] = instance.get("lastRequestError")
-            record["fast_last_error"] = instance.get("lastError")
-            record["fast_last_exit_code"] = instance.get("lastExitCode")
     active_records = [record for record in records if _is_active_account_record(record)]
     return jsonify({"count": len(active_records), "rawCount": len(records), "accounts": active_records})
 
@@ -645,11 +588,7 @@ def dashboard_config():
         "CHATMOCK_CODEX_PLAN_TYPE": settings["chatgptAuthPlanType"],
         "CHATMOCK_DASHBOARD_SETTINGS_PATH": str(_settings_path()),
         "CHATMOCK_DATA_DIR": os.getenv("CHATMOCK_DATA_DIR", ""),
-        "CHATMOCK_MANAGE_CODEX_APP_SERVER": os.getenv("CHATMOCK_MANAGE_CODEX_APP_SERVER", ""),
-        "CHATGPT_LOCAL_UPSTREAM": os.getenv("CHATGPT_LOCAL_UPSTREAM", ""),
-        "CHATGPT_LOCAL_CODEX_APP_SERVER_URL": os.getenv("CHATGPT_LOCAL_CODEX_APP_SERVER_URL", ""),
         "CHATMOCK_EXPOSE_SERVICE_TIER": os.getenv("CHATMOCK_EXPOSE_SERVICE_TIER", "1"),
-        "CODEX_HOME": os.getenv("CODEX_HOME", ""),
         "service": service,
         "configRead": runtime_config,
     }
@@ -694,12 +633,6 @@ def dashboard_logs():
     lines = max(20, min(lines, 1000))
     log_path = _default_log_path()
     text = _read_log_tail(log_path, lines)
-    manager = _runtime_codex_manager()
-    if manager is not None:
-        manager_logs = manager.tail_logs(lines=lines)
-        if manager_logs:
-            combined = [f"[chatmock log] {log_path}", text, "", "[codex app-server]", manager_logs]
-            text = "\n".join(part for part in combined if isinstance(part, str) and part)
     return jsonify({"lines": lines, "logPath": log_path, "text": text})
 
 
@@ -714,26 +647,18 @@ def dashboard_action_service():
     action = str((request.get_json(silent=True) or {}).get("action") or "").strip().lower()
     if action not in ("start", "stop", "restart"):
         return make_response(jsonify({"error": "action must be one of start|stop|restart"}), 400)
-    manager = _runtime_codex_manager()
-    if manager is None:
-        return make_response(jsonify({"ok": False, "error": "runtime manager is unavailable"}), 400)
-
-    try:
-        result = getattr(manager, action)()
-        health = dashboard_health().get_json()
-        return jsonify(
+    health = dashboard_health().get_json()
+    return make_response(
+        jsonify(
             {
-                "ok": bool(result.get("ok")),
+                "ok": False,
                 "action": action,
-                "manager": "runtime",
-                "stdout": result.get("message", ""),
-                "stderr": result.get("error", ""),
-                "status": result.get("status"),
+                "error": "service actions are unavailable in backend-only mode",
                 "health": health,
             }
-        )
-    except Exception as exc:
-        return make_response(jsonify({"ok": False, "error": str(exc)}), 500)
+        ),
+        410,
+    )
 
 
 @dashboard_bp.post("/api/actions/upload_auths")
@@ -818,14 +743,6 @@ def dashboard_action_upload_auths():
     if primary_payload is not None:
         write_auth_file(primary_payload)
 
-    service_result: Dict[str, Any] | None = None
-    manager = _runtime_codex_manager()
-    if manager is not None:
-        try:
-            service_result = manager.sync_from_auth_files(saved["authFiles"], restart=True)
-        except Exception as exc:
-            service_result = {"ok": False, "error": str(exc), "status": _service_status()}
-
     records = get_chatgpt_auth_records()
     return jsonify(
         {
@@ -841,6 +758,6 @@ def dashboard_action_upload_auths():
             "errors": errors,
             "settingsPath": str(_settings_path()),
             "savedSettings": saved,
-            "service": service_result,
+            "service": _service_status(),
         }
     )

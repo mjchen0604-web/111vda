@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -28,25 +27,6 @@ def wait_http(url: str, timeout: int = 30) -> tuple[bool, str | None]:
             last_error = f"http {response.status_code}"
         except Exception as exc:  # pragma: no cover - network probe
             last_error = str(exc)
-        time.sleep(1)
-    return False, last_error
-
-
-def wait_port(port: int, timeout: int = 20) -> tuple[bool, str | None]:
-    import socket
-
-    deadline = time.time() + timeout
-    last_error = None
-    while time.time() < deadline:
-        sock = socket.socket()
-        sock.settimeout(1)
-        try:
-            sock.connect(("127.0.0.1", port))
-            return True, None
-        except Exception as exc:  # pragma: no cover - socket probe
-            last_error = str(exc)
-        finally:
-            sock.close()
         time.sleep(1)
     return False, last_error
 
@@ -96,7 +76,7 @@ def run_probe(base_url: str, probe_name: str, body: dict[str, object]) -> dict[s
         parsed = response.json()
     except Exception:
         parsed = response.text[:2000]
-    result: dict[str, object] = {
+    return {
         "probe": probe_name,
         "status": response.status_code,
         "requested": response.headers.get("IDIIfy-Service-Tier-Requested"),
@@ -104,12 +84,11 @@ def run_probe(base_url: str, probe_name: str, body: dict[str, object]) -> dict[s
         "service_tier": parsed.get("service_tier") if isinstance(parsed, dict) else None,
         "body": parsed,
     }
-    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run a local Codex fast probe with a selected auth.json."
+        description="Run a local fast/flex probe against ChatGPT backend with a selected auth.json."
     )
     parser.add_argument("--auth", default="auth02", help="Auth basename like auth02")
     parser.add_argument(
@@ -120,14 +99,13 @@ def main() -> int:
     parser.add_argument(
         "--work-root",
         default=str(DEFAULT_WORK_ROOT),
-        help="Directory used for temporary CODEX_HOME and logs",
+        help="Directory used for temporary auth home and logs",
     )
-    parser.add_argument("--ws-port", type=int, default=8787, help="Local app-server port")
     parser.add_argument("--http-port", type=int, default=1455, help="Local chatmock port")
     parser.add_argument(
         "--keep-running",
         action="store_true",
-        help="Keep both local services running after probes complete",
+        help="Keep the local chatmock service running after probes complete",
     )
     args = parser.parse_args()
 
@@ -142,51 +120,20 @@ def main() -> int:
     if case_dir.exists():
         shutil.rmtree(case_dir)
     case_dir.mkdir(parents=True, exist_ok=True)
-    codex_home = case_dir / ".codex"
-    codex_home.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(auth_path, codex_home / "auth.json")
+    chatgpt_home = case_dir / ".codex"
+    chatgpt_home.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(auth_path, chatgpt_home / "auth.json")
 
-    app_env = os.environ.copy()
-    app_env["CODEX_HOME"] = str(codex_home)
-
-    app_server = None
     chatmock = None
-    app_stdout = app_stderr = chat_stdout = chat_stderr = None
+    chat_stdout = chat_stderr = None
 
     try:
-        app_server, app_stdout, app_stderr = start_process(
-            [
-                "codex",
-                "app-server",
-                "--listen",
-                f"ws://127.0.0.1:{args.ws_port}",
-                "--enable",
-                "fast_mode",
-            ],
-            cwd=case_dir,
-            env=app_env,
-            stdout_path=case_dir / "appserver.stdout.log",
-            stderr_path=case_dir / "appserver.stderr.log",
-        )
-        port_ok, port_error = wait_port(args.ws_port, timeout=25)
-        if not port_ok:
-            print(
-                json.dumps(
-                    {
-                        "case": args.auth,
-                        "stage": "app-server",
-                        "ok": False,
-                        "error": port_error,
-                        "stderr_tail": (case_dir / "appserver.stderr.log").read_text(
-                            encoding="utf-8", errors="replace"
-                        )[-4000:],
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
-            return 1
-
+        env = {
+            **os.environ.copy(),
+            "CHATGPT_LOCAL_HOME": str(chatgpt_home),
+            "CHATMOCK_EXPOSE_SERVICE_TIER": "1",
+            "CHATMOCK_EXPOSE_INTERNAL_ERROR_DETAILS": "1",
+        }
         chatmock, chat_stdout, chat_stderr = start_process(
             [
                 sys.executable,
@@ -196,14 +143,10 @@ def main() -> int:
                 "127.0.0.1",
                 "--port",
                 str(args.http_port),
-                "--upstream",
-                "codex-app-server",
-                "--codex-app-server-url",
-                f"ws://127.0.0.1:{args.ws_port}",
                 "--verbose",
             ],
             cwd=CHATMOCK_DIR,
-            env={**os.environ.copy(), "CHATMOCK_EXPOSE_SERVICE_TIER": "1", "CHATMOCK_EXPOSE_INTERNAL_ERROR_DETAILS": "1"},
+            env=env,
             stdout_path=case_dir / "chatmock.stdout.log",
             stderr_path=case_dir / "chatmock.stderr.log",
         )
@@ -247,6 +190,16 @@ def main() -> int:
                     "stream": False,
                 },
             ),
+            run_probe(
+                base_url,
+                "explicit_flex",
+                {
+                    "model": "gpt-5.4",
+                    "service_tier": "flex",
+                    "messages": [{"role": "user", "content": "reply with ok"}],
+                    "stream": False,
+                },
+            ),
         ]
 
         print(
@@ -257,8 +210,6 @@ def main() -> int:
                     "base_url": base_url,
                     "probes": probes,
                     "logs": {
-                        "appserver_stdout": str(case_dir / "appserver.stdout.log"),
-                        "appserver_stderr": str(case_dir / "appserver.stderr.log"),
                         "chatmock_stdout": str(case_dir / "chatmock.stdout.log"),
                         "chatmock_stderr": str(case_dir / "chatmock.stderr.log"),
                     },
@@ -269,7 +220,7 @@ def main() -> int:
         )
 
         if args.keep_running:
-            print("Keeping local services running. Press Ctrl+C to stop.")
+            print("Keeping local service running. Press Ctrl+C to stop.")
             try:
                 while True:
                     time.sleep(1)
@@ -279,7 +230,6 @@ def main() -> int:
     finally:
         if not args.keep_running:
             stop_process(chatmock, chat_stdout, chat_stderr)
-            stop_process(app_server, app_stdout, app_stderr)
 
 
 if __name__ == "__main__":

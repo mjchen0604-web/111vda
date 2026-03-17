@@ -9,11 +9,8 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.routes_dashboard import _merge_payload_settings
-from chatmock.routes_anthropic import _resolve_service_tier as _resolve_anthropic_service_tier
-from chatmock.routes_openai import _resolve_web_search_mode
-from chatmock.routes_ollama import _resolve_service_tier as _resolve_ollama_service_tier
-from chatmock.routes_openai import _resolve_service_tier as _resolve_openai_service_tier
-from chatmock.upstream import _normalize_service_tier, normalize_model_name, resolve_upstream_mode
+from chatmock.routes_openai import _instructions_for_model, _resolve_bridge_instructions, _resolve_web_search_mode
+from chatmock.upstream import normalize_model_name, resolve_upstream_mode
 
 
 class UpstreamRoutingTests(unittest.TestCase):
@@ -34,26 +31,26 @@ class UpstreamRoutingTests(unittest.TestCase):
             mode = _resolve_web_search_mode({}, [], [])
         self.assertEqual(mode, "disabled")
 
-    def test_fast_service_tier_maps_to_public_priority(self):
-        self.assertEqual(_normalize_service_tier("fast"), "priority")
-        self.assertEqual(_normalize_service_tier("priority"), "priority")
-        self.assertEqual(_normalize_service_tier("flex"), "flex")
+    def test_fast_and_flex_models_still_use_chatgpt_backend(self):
+        self.assertEqual(resolve_upstream_mode("auto", "gpt-5.4-fast-low", None), "chatgpt-backend")
+        self.assertEqual(resolve_upstream_mode("auto", "gpt-5.4", "flex"), "chatgpt-backend")
 
-    def test_fast_mode_maps_to_fast_service_tier_in_all_routes(self):
-        self.assertEqual(_resolve_openai_service_tier({"fast_mode": True}, "gpt-5.4"), "fast")
-        self.assertEqual(_resolve_anthropic_service_tier({"fast_mode": True}, "gpt-5.4"), "fast")
-        self.assertEqual(_resolve_ollama_service_tier({"fast_mode": True}, "gpt-5.4"), "fast")
+    def test_gpt54_family_uses_base_instructions(self):
+        app = Flask(__name__)
+        app.config["BASE_INSTRUCTIONS"] = "base-template"
+        app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
+        with app.app_context():
+            self.assertEqual(_instructions_for_model("gpt-5.4"), "base-template")
+            self.assertEqual(_instructions_for_model("gpt-5.4-fast"), "base-template")
+            self.assertEqual(_instructions_for_model("gpt-5-codex"), "codex-template")
 
-    def test_false_fast_mode_disables_alias_service_tier(self):
-        self.assertIsNone(_resolve_openai_service_tier({"fast_mode": False}, "gpt-5.4-fast"))
-        self.assertIsNone(_resolve_anthropic_service_tier({"fast_mode": False}, "gpt-5.4-fast"))
-        self.assertIsNone(_resolve_ollama_service_tier({"fast_mode": False}, "gpt-5.4-fast"))
-
-    def test_auto_mode_keeps_fast_requests_on_chatgpt_backend(self):
-        self.assertEqual(
-            resolve_upstream_mode("auto", "gpt-5.4-fast-low", "fast"),
-            "chatgpt-backend",
-        )
+    def test_native_prompt_mode_can_produce_empty_template(self):
+        app = Flask(__name__)
+        app.config["BASE_INSTRUCTIONS"] = "base-template"
+        app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
+        with app.app_context():
+            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", {}), "base-template")
+            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", {"prompt_mode": "native"}), "")
 
     def test_dashboard_settings_force_web_search_off(self):
         current = {

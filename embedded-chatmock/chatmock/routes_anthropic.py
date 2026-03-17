@@ -14,8 +14,7 @@ from .reasoning import (
     build_reasoning_param,
     extract_reasoning_from_model_name,
     extract_service_tier_from_model_name,
-    parse_fast_mode,
-    public_service_tier_name,
+    presented_service_tier_name,
 )
 from .upstream_errors import (
     build_anthropic_error_response,
@@ -25,7 +24,7 @@ from .upstream_errors import (
     error_info_from_http_response,
     should_retry_next_candidate,
 )
-from .upstream import normalize_model_name, resolve_upstream_mode, start_upstream_request
+from .upstream import normalize_model_name, start_upstream_request
 from .thread_sessions import resolve_thread_session_state
 from .utils import (
     extract_response_output_text,
@@ -70,22 +69,11 @@ def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | N
     system_prompt = payload.get("system_prompt")
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt.strip()
-    return None
+    return ""
 
 
 def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_tier: str | None = None) -> int:
-    configured_mode = str(current_app.config.get("UPSTREAM_MODE") or "auto").strip().lower()
-    selected_mode = resolve_upstream_mode(configured_mode, model or "", service_tier)
-    if is_stream and selected_mode != "codex-app-server":
-        return 1
-    if selected_mode != "codex-app-server":
-        return 1
-    manager = current_app.config.get("CODEX_APP_SERVER_MANAGER")
-    if manager is not None and hasattr(manager, "get_request_candidates"):
-        try:
-            return max(1, len(manager.get_request_candidates() or []))
-        except Exception:
-            return 1
+    _ = is_stream, model, service_tier
     return 1
 
 
@@ -96,11 +84,6 @@ def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None =
         if normalized in ("", "off", "none", "unset"):
             return None
         return normalized
-    fast_mode = parse_fast_mode(payload.get("fast_mode"))
-    if fast_mode is True:
-        return "fast"
-    if fast_mode is False:
-        return None
     alias_value = extract_service_tier_from_model_name(requested_model)
     if isinstance(alias_value, str) and alias_value:
         return alias_value
@@ -560,7 +543,11 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                 continue
 
             if kind == "response.failed":
-                error_info = error_info_from_event_response("codex-app-server", "stream", evt.get("response"))
+                error_info = error_info_from_event_response(
+                    getattr(upstream, "chatmock_source", "upstream"),
+                    "stream",
+                    evt.get("response"),
+                )
                 payload = build_anthropic_error_response(error_info).get_json()
                 yield _emit("error", payload)
                 return
@@ -843,8 +830,9 @@ def messages() -> Response:
         "stop_sequence": None,
         "usage": {"input_tokens": usage_in, "output_tokens": usage_out},
     }
-    if observed_service_tier:
-        message_obj["service_tier"] = public_service_tier_name(observed_service_tier)
+    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
+    if presented_service_tier:
+        message_obj["service_tier"] = presented_service_tier
     if verbose:
         _log_json("OUT POST /v1/messages", message_obj)
 

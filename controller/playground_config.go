@@ -281,6 +281,7 @@ func SavePlaygroundApplyToRealAPI(c *gin.Context) {
 	}
 	userSetting := user.GetSetting()
 	enabled := req.Enabled
+	userSetting.PlaygroundApplyToRealAPI = nil
 	if kind == "prompt" {
 		userSetting.PlaygroundApplyPromptToRealAPI = &enabled
 	} else {
@@ -302,13 +303,8 @@ func SavePlaygroundApplyToRealAPI(c *gin.Context) {
 }
 
 func resolvePlaygroundApplyFlags(userSettings dto.UserSetting) (bool, bool) {
-	legacy := currentPlaygroundApplyOption("PlaygroundGlobalApplyToRealAPI", true)
-	legacy = currentPlaygroundApplyOption("PlaygroundAdminApplyToRealAPI", legacy)
-	if userSettings.PlaygroundApplyToRealAPI != nil {
-		legacy = *userSettings.PlaygroundApplyToRealAPI
-	}
-	applyPrompt := legacy
-	applyModelConfig := legacy
+	applyPrompt := false
+	applyModelConfig := false
 	if userSettings.PlaygroundApplyPromptToRealAPI != nil {
 		applyPrompt = *userSettings.PlaygroundApplyPromptToRealAPI
 	}

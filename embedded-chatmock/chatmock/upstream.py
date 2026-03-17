@@ -8,12 +8,10 @@ import requests
 from flask import current_app, jsonify, make_response
 from flask import request as flask_request
 
-from .codex_app_server import CodexAppServerError, connect_codex_app_server
 from .config import CHATGPT_RESPONSES_URL
 from .http import build_cors_headers
 from .reasoning import split_model_alias
 from .session import ensure_session_id
-from .surface_names import public_upstream_name
 from .upstream_errors import (
     build_error_info,
     build_openai_error_response,
@@ -82,8 +80,6 @@ def _normalize_service_tier(service_tier: str | None) -> str | None:
     normalized = service_tier.strip().lower()
     if normalized in ("off", "none", "unset", "default"):
         return None
-    # Local product semantics keep using "fast", but the upstream Responses
-    # API expects the public performance tier name "priority".
     if normalized == "fast":
         return "priority"
     if normalized in ("priority", "flex"):
@@ -91,182 +87,9 @@ def _normalize_service_tier(service_tier: str | None) -> str | None:
     return None
 
 
-def _prefers_codex_app_server(model: str, service_tier: str | None) -> bool:
-    return False
-
-
 def resolve_upstream_mode(configured_mode: str, model: str, service_tier: str | None) -> str:
-    normalized_mode = str(configured_mode or "").strip().lower()
-    if normalized_mode in ("", "default"):
-        normalized_mode = "auto"
-    if normalized_mode != "auto":
-        return normalized_mode
+    _ = configured_mode, model, service_tier
     return "chatgpt-backend"
-
-
-def _start_codex_app_server_request(
-    model: str,
-    input_items: List[Dict[str, Any]],
-    *,
-    instructions: str | None = None,
-    tools: List[Dict[str, Any]] | None = None,
-    tool_choice: Any | None = None,
-    parallel_tool_calls: bool = False,
-    reasoning_param: Dict[str, Any] | None = None,
-    service_tier: str | None = None,
-    web_search_mode: str | None = None,
-    thread_session: Dict[str, Any] | None = None,
-    verbose: bool = False,
-):
-    app_server_url = str(current_app.config.get("CODEX_APP_SERVER_URL") or "").strip()
-    if not app_server_url:
-        return None, build_openai_error_response(
-            build_error_info(
-                source="chatmock",
-                phase="config",
-                raw_status=500,
-                raw_message="Missing accelerator upstream URL",
-                raw_body={"message": "Missing accelerator upstream URL"},
-            )
-        )
-
-    manager = current_app.config.get("CODEX_APP_SERVER_MANAGER")
-    preferred_label = None
-    preferred_url = None
-    if isinstance(thread_session, dict):
-        preferred_label = str(thread_session.get("candidate_label") or "").strip() or None
-        preferred_url = str(thread_session.get("candidate_url") or "").strip() or None
-
-    last_error = None
-    last_error_info = None
-    tried_labels: set[str] = set()
-    candidates: List[Dict[str, str]] = []
-    if manager is not None and hasattr(manager, "get_request_candidates"):
-        try:
-            candidates = list(manager.get_request_candidates() or [])
-        except Exception as exc:
-            if verbose:
-                print(f"codex app-server pool candidate lookup failed: {exc}")
-            candidates = []
-    if not candidates:
-        candidates = [{"label": "default", "url": app_server_url}]
-
-    if preferred_label or preferred_url:
-        preferred_candidates = []
-        other_candidates = []
-        for candidate in candidates:
-            candidate_label = str(candidate.get("label") or "").strip()
-            candidate_url = str(candidate.get("url") or "").strip()
-            if (preferred_label and candidate_label == preferred_label) or (
-                preferred_url and candidate_url == preferred_url
-            ):
-                preferred_candidates.append(candidate)
-            else:
-                other_candidates.append(candidate)
-        candidates = preferred_candidates + other_candidates
-    direct_candidate_walk = (
-        isinstance(service_tier, str)
-        and service_tier.strip().lower() in ("fast", "flex", "priority")
-    )
-    loop_count = max(1, len(candidates))
-    for _ in range(loop_count):
-        candidate = None
-        if not direct_candidate_walk and manager is not None and hasattr(manager, "claim_request_candidate"):
-            try:
-                candidate = manager.claim_request_candidate(
-                    excluded_labels=tried_labels,
-                    preferred_label=preferred_label,
-                    preferred_url=preferred_url,
-                )
-            except Exception as exc:
-                if verbose:
-                    print(f"codex app-server pool candidate claim failed: {exc}")
-                candidate = None
-        if not isinstance(candidate, dict):
-            for fallback_candidate in candidates:
-                fallback_label = str(fallback_candidate.get("label") or "").strip()
-                if fallback_label and fallback_label in tried_labels:
-                    continue
-                candidate = fallback_candidate
-                break
-        if not isinstance(candidate, dict):
-            break
-        candidate_url = str(candidate.get("url") or "").strip() or app_server_url
-        candidate_label = str(candidate.get("label") or "default").strip() or "default"
-        tried_labels.add(candidate_label)
-        if is_auth_candidate_blocked(candidate):
-            if not direct_candidate_walk and manager is not None and hasattr(manager, "release_request_slot"):
-                try:
-                    manager.release_request_slot(candidate_label)
-                except Exception:
-                    pass
-            continue
-        if verbose:
-            print(f"codex app-server candidate -> {candidate_label} @ {candidate_url}")
-        try:
-            upstream = connect_codex_app_server(
-                app_server_url=candidate_url,
-                candidate_label=candidate_label,
-                model=model,
-                input_items=input_items,
-                instructions=instructions,
-                tools=tools,
-                tool_choice=tool_choice,
-                parallel_tool_calls=parallel_tool_calls,
-                reasoning_param=reasoning_param,
-                service_tier=service_tier,
-                web_search_mode=web_search_mode,
-                thread_session=thread_session,
-                verbose=verbose,
-            )
-        except Exception as exc:
-            last_error = exc
-            status_code = exc.status_code if isinstance(exc, CodexAppServerError) else None
-            last_error_info = (
-                exc.error_info
-                if isinstance(exc, CodexAppServerError) and isinstance(exc.error_info, dict)
-                else build_error_info(
-                    source="codex-app-server",
-                    phase="connect",
-                    raw_status=status_code,
-                    raw_message=str(exc),
-                    raw_body={"exception": str(exc)},
-                )
-            )
-            if manager is not None and hasattr(manager, "mark_request_result"):
-                try:
-                    manager.mark_request_result(
-                        candidate_label,
-                        success=False,
-                        error_message=str(exc),
-                        status_code=status_code,
-                        error_info=last_error_info,
-                    )
-                except Exception:
-                    pass
-            if verbose:
-                print(f"codex app-server upstream failed for {candidate_label} ({candidate_url}): {exc}")
-            continue
-        if manager is not None and hasattr(manager, "wrap_upstream"):
-            try:
-                upstream = manager.wrap_upstream(candidate_label, upstream)
-            except Exception:
-                pass
-        try:
-            upstream.chatmock_source = "codex-app-server"
-        except Exception:
-            pass
-        return upstream, None
-
-    if last_error_info is None:
-        last_error_info = build_error_info(
-            source="codex-app-server",
-            phase="connect",
-            raw_status=502,
-            raw_message=f"codex app-server upstream failed for all candidates: {last_error or 'no candidates available'}",
-            raw_body={"message": f"codex app-server upstream failed for all candidates: {last_error or 'no candidates available'}"},
-        )
-    return None, build_openai_error_response(last_error_info)
 
 
 def _start_chatgpt_backend_request(
@@ -282,7 +105,6 @@ def _start_chatgpt_backend_request(
     verbose: bool = False,
 ):
     normalized_service_tier = _normalize_service_tier(service_tier)
-
     auth_candidates = get_effective_chatgpt_auth_candidates(ensure_fresh=True)
     if not auth_candidates:
         resp = make_response(
@@ -290,8 +112,8 @@ def _start_chatgpt_backend_request(
                 {
                     "error": {
                         "message": (
-                            "Missing ChatGPT credentials. Run 'python chatmock.py login' first, "
-                            "or configure CHATGPT_LOCAL_AUTH_FILES/auth_pool.json for multi-account mode."
+                            "Missing ChatGPT credentials. Configure CHATGPT_LOCAL_AUTH_FILES "
+                            "or place auth.json under CHATGPT_LOCAL_HOME."
                         ),
                     }
                 }
@@ -328,13 +150,12 @@ def _start_chatgpt_backend_request(
         "stream": True,
         "prompt_cache_key": session_id,
     }
-    if normalized_service_tier is not None:
-        responses_payload["service_tier"] = normalized_service_tier
     if include:
         responses_payload["include"] = include
-
     if reasoning_param is not None:
         responses_payload["reasoning"] = reasoning_param
+    if normalized_service_tier is not None:
+        responses_payload["service_tier"] = normalized_service_tier
     if verbose:
         _log_json("OUTBOUND >> ChatGPT Responses API payload", responses_payload)
 
@@ -452,29 +273,14 @@ def start_upstream_request(
     web_search_mode: str | None = None,
     thread_session: Dict[str, Any] | None = None,
 ):
-    upstream_mode = str(current_app.config.get("UPSTREAM_MODE") or "auto").strip().lower()
+    _ = web_search_mode, thread_session
     verbose = False
     try:
         verbose = bool(current_app.config.get("VERBOSE"))
     except Exception:
         verbose = False
-    selected_mode = resolve_upstream_mode(upstream_mode, model, service_tier)
     if verbose:
-        print(f"auto path -> selected {public_upstream_name(selected_mode)} for model {model}")
-    if selected_mode == "codex-app-server":
-        return _start_codex_app_server_request(
-            model,
-            input_items,
-            instructions=instructions,
-            tools=tools,
-            tool_choice=tool_choice,
-            parallel_tool_calls=parallel_tool_calls,
-            reasoning_param=reasoning_param,
-            service_tier=service_tier,
-            web_search_mode=web_search_mode,
-            thread_session=thread_session,
-            verbose=verbose,
-        )
+        print(f"selected upstream -> chatgpt-backend for model {model}")
     return _start_chatgpt_backend_request(
         model,
         input_items,

@@ -733,12 +733,7 @@ export function stringToColor(str) {
 // 渲染带有模型图标的标签
 export function toPublicModelName(modelName) {
   if (!modelName || typeof modelName !== 'string') return modelName;
-  let normalized = modelName;
-  normalized = normalized.replaceAll('-lightning-', '-fast-');
-  if (normalized.endsWith('-lightning')) {
-    normalized = normalized.slice(0, -10) + '-fast';
-  }
-  return normalized;
+  return modelName;
 }
 
 export function renderModelTag(modelName, options = {}) {

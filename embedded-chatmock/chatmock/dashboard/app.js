@@ -85,18 +85,12 @@ function classifyServiceChip(health) {
   const serviceState = String(health?.service?.status || "").toLowerCase();
   const listening = Boolean(health?.listening);
   const hasModels = Number(health?.models?.count || 0) > 0;
-  const serviceReady = ["started", "running", "active"].includes(serviceState);
+  const serviceReady = ["started", "running", "active", "chatgpt-backend"].includes(serviceState);
   if (serviceReady && listening && hasModels) {
     return { text: "ONLINE", className: "status-chip ok" };
   }
   if (serviceState === "awaiting_auth") {
     return { text: "AUTH", className: "status-chip warn" };
-  }
-  if (serviceState === "external") {
-    return { text: "EXTERNAL", className: "status-chip warn" };
-  }
-  if (serviceState === "starting") {
-    return { text: "STARTING", className: "status-chip warn" };
   }
   if (serviceState === "error") {
     return { text: "ERROR", className: "status-chip bad" };
@@ -120,12 +114,8 @@ function renderHealth(health) {
   let detail = "";
   if (serviceState === "awaiting_auth") {
     detail = "waiting for uploaded auth";
-  } else if (serviceState === "external") {
-    detail = "using external codex app-server";
-  } else if (serviceState === "starting") {
-    detail = "starting codex app-server";
-  } else if (serviceState === "running" && health?.service?.url) {
-    detail = String(health.service.url);
+  } else if (serviceState === "chatgpt-backend") {
+    detail = "using chatgpt backend";
   }
   nodes.healthHint.textContent = detail
     ? `status checked: ${checkedAt} · ${detail}`
@@ -168,9 +158,7 @@ function renderAccounts(payload) {
               <div class="account-file">${acc.label || "-"}</div>
               <div class="account-mail">${acc.source || "-"}</div>
             </div>
-            <div class="account-file">status: fast:${acc.fast_status || "-"} | std:${
-              acc.last_status ?? acc.status ?? "-"
-            }</div>
+            <div class="account-file">status: ${acc.last_status ?? acc.status ?? "-"}</div>
           </div>
           <div class="account-meta">
             <div>account: ${acc.account_id || "-"}</div>
@@ -181,11 +169,6 @@ function renderAccounts(payload) {
             <div>classification: ${acc.last_classification || "-"}</div>
             <div>raw code: ${acc.last_raw_code || "-"}</div>
             <div>raw message: ${acc.last_raw_message || "-"}</div>
-            <div>fast: ${acc.fast_status || "-"} ${acc.fast_port ? `@${acc.fast_port}` : ""}</div>
-            <div>fast requests: ${acc.fast_request_successes || 0}/${acc.fast_request_count || 0}</div>
-            <div>fast failures: ${acc.fast_request_failures || 0}</div>
-            <div>fast cooldown: ${acc.fast_cooldown_remaining || 0}s</div>
-            <div>fast error: ${acc.fast_last_request_error || acc.fast_last_error || "-"}</div>
           </div>
           ${tokenPill("access", Boolean(acc.has_access_token))}
           ${tokenPill("refresh", Boolean(acc.has_refresh_token))}
@@ -421,27 +404,6 @@ async function runSync() {
   }
 }
 
-async function runServiceAction(action) {
-  try {
-    const payload = await api("/api/actions/service", {
-      method: "POST",
-      body: JSON.stringify({ action }),
-    });
-    const report = [`[service ${action}]`, String(payload.stdout || "").trim(), String(payload.stderr || "").trim()]
-      .filter(Boolean)
-      .join("\n");
-    setOutput(report || `${action} done`);
-    if (payload.health) {
-      renderHealth(payload.health);
-    }
-    await refreshModels();
-    showToast(`Service action completed: ${action}`);
-  } catch (error) {
-    setOutput(String(error.message || error));
-    showToast(`Service action failed: ${action}`, true);
-  }
-}
-
 async function uploadAuthFiles() {
   const fileInput = nodes.authFiles;
   if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
@@ -466,9 +428,6 @@ async function uploadAuthFiles() {
 
     const lines = [
       `[upload] uploaded=${payload.uploaded || 0} created=${payload.created || 0} updated=${payload.updated || 0}`,
-      Number(payload?.service?.status?.instanceCount || 0) > 0
-        ? `fast instances: ${payload.service.status.instanceCount} active=${payload.service.status.activeCount || 0}`
-        : "",
       ...(Array.isArray(payload.results)
         ? payload.results.map((item) => {
             const action = item?.action || "created";
@@ -508,9 +467,6 @@ function bindActions() {
     showToast("Refresh complete");
   });
   $("btn-sync").addEventListener("click", runSync);
-  $("btn-restart").addEventListener("click", () => runServiceAction("restart"));
-  $("btn-start").addEventListener("click", () => runServiceAction("start"));
-  $("btn-stop").addEventListener("click", () => runServiceAction("stop"));
   $("btn-models").addEventListener("click", refreshModels);
   $("btn-logs").addEventListener("click", refreshLogs);
   $("btn-config").addEventListener("click", refreshConfig);

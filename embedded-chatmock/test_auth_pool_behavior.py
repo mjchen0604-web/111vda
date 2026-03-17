@@ -9,7 +9,6 @@ from pathlib import Path
 CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
-from chatmock.codex_manager import CodexAppServerPoolManager
 from chatmock.utils import _dedupe_candidates_by_account_id, _parse_auth_files_env
 
 
@@ -56,21 +55,6 @@ class AuthPoolBehaviorTests(unittest.TestCase):
                 os.environ.pop("CHATMOCK_DATA_DIR", None)
             else:
                 os.environ["CHATMOCK_DATA_DIR"] = original_data_dir
-
-    def test_codex_pool_manager_keeps_same_account_id_different_auth_files(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            auth_paths = []
-            for label in ("acc01", "acc02"):
-                auth_dir = Path(temp_dir) / label
-                auth_dir.mkdir(parents=True, exist_ok=True)
-                auth_path = auth_dir / "auth.json"
-                auth_path.write_text(json.dumps({"tokens": {"account_id": "same-account"}}), encoding="utf-8")
-                auth_paths.append(str(auth_path))
-
-            manager = CodexAppServerPoolManager("ws://127.0.0.1:8787")
-            entries = manager._desired_entries(auth_paths)
-            self.assertEqual(len(entries), 2)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ from .reasoning import (
     extract_service_tier_from_model_name,
     parse_fast_mode,
     public_model_name,
-    public_service_tier_name,
+    presented_service_tier_name,
 )
 from .transform import convert_ollama_messages, normalize_ollama_tools
 from .thread_sessions import resolve_thread_session_state
@@ -30,7 +30,7 @@ from .upstream_errors import (
     normalized_error_payload,
     should_retry_next_candidate,
 )
-from .upstream import normalize_model_name, resolve_upstream_mode, start_upstream_request
+from .upstream import normalize_model_name, start_upstream_request
 from .utils import (
     RetryableStreamError,
     convert_chat_messages_to_responses_input,
@@ -109,22 +109,11 @@ def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | N
     system_prompt = payload.get("system_prompt")
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt.strip()
-    return None
+    return ""
 
 
 def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_tier: str | None = None) -> int:
-    configured_mode = str(current_app.config.get("UPSTREAM_MODE") or "auto").strip().lower()
-    selected_mode = resolve_upstream_mode(configured_mode, model or "", service_tier)
-    if is_stream and selected_mode != "codex-app-server":
-        return 1
-    if selected_mode != "codex-app-server":
-        return 1
-    manager = current_app.config.get("CODEX_APP_SERVER_MANAGER")
-    if manager is not None and hasattr(manager, "get_request_candidates"):
-        try:
-            return max(1, len(manager.get_request_candidates() or []))
-        except Exception:
-            return 1
+    _ = is_stream, model, service_tier
     return 1
 
 
@@ -817,8 +806,9 @@ def ollama_chat() -> Response:
         "done": True,
         "done_reason": "tool_calls" if tool_calls else "stop",
     }
-    if observed_service_tier:
-        out_json["service_tier"] = public_service_tier_name(observed_service_tier)
+    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
+    if presented_service_tier:
+        out_json["service_tier"] = presented_service_tier
     out_json.update(_OLLAMA_FAKE_EVAL)
     if verbose:
         _log_json("OUT POST /api/chat", out_json)

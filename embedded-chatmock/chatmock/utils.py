@@ -159,7 +159,7 @@ class ManagedAuthUpstream:
 
 
 def get_home_dir() -> str:
-    home = os.getenv("CHATGPT_LOCAL_HOME") or os.getenv("CODEX_HOME")
+    home = os.getenv("CHATGPT_LOCAL_HOME")
     if not home:
         home = os.path.expanduser("~/.chatgpt-local")
     return home
@@ -169,14 +169,12 @@ def _candidate_auth_bases() -> List[str]:
     bases: List[str] = []
     explicit_bases = [
         os.getenv("CHATGPT_LOCAL_HOME"),
-        os.getenv("CODEX_HOME"),
     ]
     if any(isinstance(base, str) and base for base in explicit_bases):
         source_bases = explicit_bases
     else:
         source_bases = [
             os.path.expanduser("~/.chatgpt-local"),
-            os.path.expanduser("~/.codex"),
         ]
     for base in source_bases:
         if not isinstance(base, str) or not base:
