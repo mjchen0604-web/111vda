@@ -150,12 +150,27 @@ def extract_service_tier_from_model_name(model: str | None) -> str | None:
     return service_tier
 
 
+def parse_fast_mode(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "1", "yes", "on", "fast"):
+            return True
+        if normalized in ("false", "0", "no", "off", "none", "unset", ""):
+            return False
+    return None
+
+
 def public_service_tier_name(service_tier: str | None) -> str | None:
     if not isinstance(service_tier, str) or not service_tier.strip():
         return None
     normalized = service_tier.strip().lower()
-    if normalized in ("fast", "priority"):
-        return "priority"
     return normalized
 
 

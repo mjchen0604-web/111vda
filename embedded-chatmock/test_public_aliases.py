@@ -7,7 +7,7 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.codex_app_server import normalize_service_tier_for_codex
-from chatmock.reasoning import public_model_name, public_service_tier_name, split_model_alias
+from chatmock.reasoning import parse_fast_mode, public_model_name, public_service_tier_name, split_model_alias
 from chatmock.upstream import _normalize_service_tier
 
 
@@ -18,13 +18,21 @@ class PublicAliasTests(unittest.TestCase):
         self.assertEqual(effort, "high")
         self.assertEqual(service_tier, "fast")
 
-    def test_public_service_tier_maps_fast_to_priority(self):
-        self.assertEqual(public_service_tier_name("fast"), "priority")
+    def test_public_service_tier_keeps_fast_name(self):
+        self.assertEqual(public_service_tier_name("fast"), "fast")
         self.assertEqual(public_service_tier_name("priority"), "priority")
 
-    def test_service_tier_priority_maps_back_to_fast(self):
-        self.assertEqual(_normalize_service_tier("priority"), "fast")
+    def test_service_tier_priority_no_longer_maps_back_to_fast(self):
+        self.assertEqual(_normalize_service_tier("priority"), "priority")
         self.assertEqual(normalize_service_tier_for_codex("priority"), "fast")
+
+    def test_parse_fast_mode(self):
+        self.assertTrue(parse_fast_mode(True))
+        self.assertTrue(parse_fast_mode("fast"))
+        self.assertTrue(parse_fast_mode("true"))
+        self.assertFalse(parse_fast_mode(False))
+        self.assertFalse(parse_fast_mode("off"))
+        self.assertIsNone(parse_fast_mode("maybe"))
 
     def test_public_model_name_rewrites_fast_suffix(self):
         self.assertEqual(

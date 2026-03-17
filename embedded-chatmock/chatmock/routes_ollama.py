@@ -15,6 +15,7 @@ from .reasoning import (
     build_reasoning_param,
     extract_reasoning_from_model_name,
     extract_service_tier_from_model_name,
+    parse_fast_mode,
     public_model_name,
     public_service_tier_name,
 )
@@ -134,6 +135,11 @@ def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None =
         if normalized in ("", "off", "none", "unset"):
             return None
         return normalized
+    fast_mode = parse_fast_mode(payload.get("fast_mode"))
+    if fast_mode is True:
+        return "fast"
+    if fast_mode is False:
+        return None
     alias_value = extract_service_tier_from_model_name(requested_model)
     if isinstance(alias_value, str) and alias_value:
         return alias_value
