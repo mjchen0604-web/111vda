@@ -10,7 +10,7 @@ sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.routes_dashboard import _merge_payload_settings
 from chatmock.routes_openai import _resolve_web_search_mode
-from chatmock.upstream import normalize_model_name
+from chatmock.upstream import _normalize_service_tier, normalize_model_name, resolve_upstream_mode
 
 
 class UpstreamRoutingTests(unittest.TestCase):
@@ -30,6 +30,17 @@ class UpstreamRoutingTests(unittest.TestCase):
         with app.app_context():
             mode = _resolve_web_search_mode({}, [], [])
         self.assertEqual(mode, "disabled")
+
+    def test_fast_service_tier_maps_to_public_priority(self):
+        self.assertEqual(_normalize_service_tier("fast"), "priority")
+        self.assertEqual(_normalize_service_tier("priority"), "priority")
+        self.assertEqual(_normalize_service_tier("flex"), "flex")
+
+    def test_auto_mode_keeps_fast_requests_on_chatgpt_backend(self):
+        self.assertEqual(
+            resolve_upstream_mode("auto", "gpt-5.4-fast-low", "fast"),
+            "chatgpt-backend",
+        )
 
     def test_dashboard_settings_force_web_search_off(self):
         current = {

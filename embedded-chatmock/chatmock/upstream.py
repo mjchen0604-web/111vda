@@ -82,9 +82,11 @@ def _normalize_service_tier(service_tier: str | None) -> str | None:
     normalized = service_tier.strip().lower()
     if normalized in ("off", "none", "unset", "default"):
         return None
-    if normalized == "priority":
-        return "fast"
-    if normalized in ("fast", "flex"):
+    # Local product semantics keep using "fast", but the upstream Responses
+    # API expects the public performance tier name "priority".
+    if normalized == "fast":
+        return "priority"
+    if normalized in ("priority", "flex"):
         return normalized
     return None
 
@@ -162,7 +164,10 @@ def _start_codex_app_server_request(
             else:
                 other_candidates.append(candidate)
         candidates = preferred_candidates + other_candidates
-    direct_candidate_walk = _normalize_service_tier(service_tier) in ("fast", "flex")
+    direct_candidate_walk = (
+        isinstance(service_tier, str)
+        and service_tier.strip().lower() in ("fast", "flex", "priority")
+    )
     loop_count = max(1, len(candidates))
     for _ in range(loop_count):
         candidate = None
