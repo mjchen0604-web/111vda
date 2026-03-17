@@ -174,7 +174,7 @@ func TestBuildPlaygroundRuntimePreviewMergesScopes(t *testing.T) {
 	if preview["applyToRealAPI"] != true {
 		t.Fatalf("expected applyToRealAPI to be true, got %#v", preview["applyToRealAPI"])
 	}
-	mergedInputs, _ := preview["mergedInputs"].(map[string]any)
+	mergedInputs, _ := preview["playgroundMergedInputs"].(map[string]any)
 	injectWhenMissing, _ := preview["injectWhenMissing"].(map[string]any)
 	if mergedInputs["temperature"] != 0.2 {
 		t.Fatalf("expected personal temperature to win, got %#v", mergedInputs["temperature"])
@@ -269,5 +269,8 @@ func TestBuildPlaygroundRuntimePreviewApplyToRealAPIGlobalDefaultOn(t *testing.T
 	preview := buildPlaygroundRuntimePreview(ctx)
 	if preview["applyToRealAPI"] != true {
 		t.Fatalf("expected default applyToRealAPI=true, got %#v", preview["applyToRealAPI"])
+	}
+	if injectWhenMissing, _ := preview["injectWhenMissing"].(map[string]any); len(injectWhenMissing) != 0 {
+		t.Fatalf("expected no model config injection preview by default, got %#v", injectWhenMissing)
 	}
 }

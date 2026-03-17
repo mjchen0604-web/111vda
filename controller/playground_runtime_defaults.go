@@ -45,26 +45,30 @@ func buildPlaygroundRuntimePreview(c *gin.Context) map[string]any {
 	config, applyPromptEnabled, applyModelConfigEnabled, ok := loadPlaygroundRuntimePreviewConfig(c)
 	if !ok {
 		return map[string]any{
-			"applyToRealAPI":            false,
-			"applyPromptToRealAPI":      false,
-			"applyModelConfigToRealAPI": false,
-			"mergedInputs":              map[string]any{},
-			"injectWhenMissing":         map[string]any{},
-			"enabledKeys":               []string{},
+			"applyToRealAPI":             false,
+			"applyPromptToRealAPI":       false,
+			"applyModelConfigToRealAPI":  false,
+			"playgroundMergedInputs":     map[string]any{},
+			"playgroundParameterEnabled": map[string]any{},
+			"appliedPromptConfig":        map[string]any{},
+			"injectWhenMissing":          map[string]any{},
+			"enabledKeys":                []string{},
 		}
 	}
 	injected := map[string]any{}
 	enabledKeys := make([]string, 0, len(playgroundAllowedParameterKeys))
-	for key := range playgroundAllowedParameterKeys {
-		if !playgroundParamEnabled(config, key) {
-			continue
+	if applyModelConfigEnabled {
+		for key := range playgroundAllowedParameterKeys {
+			if !playgroundParamEnabled(config, key) {
+				continue
+			}
+			if value, ok := playgroundInput(config, key); ok {
+				injected[key] = value
+				enabledKeys = append(enabledKeys, key)
+			}
 		}
-		if value, ok := playgroundInput(config, key); ok {
-			injected[key] = value
-			enabledKeys = append(enabledKeys, key)
-		}
+		sort.Strings(enabledKeys)
 	}
-	sort.Strings(enabledKeys)
 	inputs, _ := config["inputs"].(map[string]any)
 	parameterEnabled, _ := config["parameterEnabled"].(map[string]any)
 	if inputs == nil {
@@ -73,15 +77,25 @@ func buildPlaygroundRuntimePreview(c *gin.Context) map[string]any {
 	if parameterEnabled == nil {
 		parameterEnabled = map[string]any{}
 	}
+	promptPreview := map[string]any{}
+	if applyPromptEnabled {
+		if value, ok := playgroundInput(config, "promptMode"); ok {
+			promptPreview["promptMode"] = value
+		}
+		if value, ok := playgroundInput(config, "systemPrompt"); ok {
+			promptPreview["systemPrompt"] = value
+		}
+	}
 	return map[string]any{
-		"applyToRealAPI":            applyPromptEnabled,
-		"applyPromptToRealAPI":      applyPromptEnabled,
-		"applyModelConfigToRealAPI": applyModelConfigEnabled,
-		"mergedInputs":              inputs,
-		"parameterEnabled":          parameterEnabled,
-		"injectWhenMissing":         injected,
-		"enabledKeys":               enabledKeys,
-		"mode":                      "fill_missing_only",
+		"applyToRealAPI":             applyPromptEnabled,
+		"applyPromptToRealAPI":       applyPromptEnabled,
+		"applyModelConfigToRealAPI":  applyModelConfigEnabled,
+		"playgroundMergedInputs":     inputs,
+		"playgroundParameterEnabled": parameterEnabled,
+		"appliedPromptConfig":        promptPreview,
+		"injectWhenMissing":          injected,
+		"enabledKeys":                enabledKeys,
+		"mode":                       "fill_missing_only",
 	}
 }
 

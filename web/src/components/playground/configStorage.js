@@ -26,6 +26,20 @@ import {
 
 const SESSION_STORAGE_KEY = 'playground_session_id';
 
+const getCurrentUserId = () => {
+  try {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) return 'anonymous';
+    const user = JSON.parse(rawUser);
+    return user?.id != null ? String(user.id) : 'anonymous';
+  } catch (error) {
+    console.error('读取当前用户失败:', error);
+    return 'anonymous';
+  }
+};
+
+const getScopedStorageKey = (baseKey) => `${baseKey}_${getCurrentUserId()}`;
+
 const pick = (source, keys) => {
   const out = {};
   keys.forEach((key) => {
@@ -58,7 +72,11 @@ export const saveConfig = (config) => {
       ...normalized,
       timestamp: new Date().toISOString(),
     };
-    localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(configToSave));
+    localStorage.setItem(
+      getScopedStorageKey(STORAGE_KEYS.CONFIG),
+      JSON.stringify(configToSave),
+    );
+    localStorage.removeItem(STORAGE_KEYS.CONFIG);
   } catch (error) {
     console.error('保存配置失败:', error);
   }
@@ -70,7 +88,11 @@ export const saveMessages = (messages) => {
       messages,
       timestamp: new Date().toISOString(),
     };
-    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messagesToSave));
+    localStorage.setItem(
+      getScopedStorageKey(STORAGE_KEYS.MESSAGES),
+      JSON.stringify(messagesToSave),
+    );
+    localStorage.removeItem(STORAGE_KEYS.MESSAGES);
   } catch (error) {
     console.error('保存消息失败:', error);
   }
@@ -94,7 +116,8 @@ export const generateConversationSessionId = () => {
 export const saveConversationSessionId = (sessionId) => {
   try {
     if (sessionId && typeof sessionId === 'string') {
-      localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+      localStorage.setItem(getScopedStorageKey(SESSION_STORAGE_KEY), sessionId);
+      localStorage.removeItem(SESSION_STORAGE_KEY);
     }
   } catch (error) {
     console.error('保存会话 ID 失败:', error);
@@ -103,7 +126,7 @@ export const saveConversationSessionId = (sessionId) => {
 
 export const loadConversationSessionId = () => {
   try {
-    const sessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+    const sessionId = localStorage.getItem(getScopedStorageKey(SESSION_STORAGE_KEY));
     return sessionId || null;
   } catch (error) {
     console.error('加载会话 ID 失败:', error);
@@ -113,6 +136,7 @@ export const loadConversationSessionId = () => {
 
 export const clearConversationSessionId = () => {
   try {
+    localStorage.removeItem(getScopedStorageKey(SESSION_STORAGE_KEY));
     localStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (error) {
     console.error('清除会话 ID 失败:', error);
@@ -121,7 +145,7 @@ export const clearConversationSessionId = () => {
 
 export const loadConfig = () => {
   try {
-    const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
+    const savedConfig = localStorage.getItem(getScopedStorageKey(STORAGE_KEYS.CONFIG));
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
       const normalized = normalizeUserScopedConfig(parsedConfig);
@@ -146,7 +170,7 @@ export const loadConfig = () => {
 
 export const loadRawConfig = () => {
   try {
-    const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
+    const savedConfig = localStorage.getItem(getScopedStorageKey(STORAGE_KEYS.CONFIG));
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
       if (parsedConfig && typeof parsedConfig === 'object') {
@@ -161,7 +185,7 @@ export const loadRawConfig = () => {
 
 export const loadMessages = () => {
   try {
-    const savedMessages = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+    const savedMessages = localStorage.getItem(getScopedStorageKey(STORAGE_KEYS.MESSAGES));
     if (savedMessages) {
       const parsedMessages = JSON.parse(savedMessages);
       return parsedMessages.messages || null;
@@ -175,6 +199,9 @@ export const loadMessages = () => {
 
 export const clearConfig = () => {
   try {
+    localStorage.removeItem(getScopedStorageKey(STORAGE_KEYS.CONFIG));
+    localStorage.removeItem(getScopedStorageKey(STORAGE_KEYS.MESSAGES));
+    localStorage.removeItem(getScopedStorageKey(SESSION_STORAGE_KEY));
     localStorage.removeItem(STORAGE_KEYS.CONFIG);
     localStorage.removeItem(STORAGE_KEYS.MESSAGES);
     localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -185,6 +212,8 @@ export const clearConfig = () => {
 
 export const clearMessages = () => {
   try {
+    localStorage.removeItem(getScopedStorageKey(STORAGE_KEYS.MESSAGES));
+    localStorage.removeItem(getScopedStorageKey(SESSION_STORAGE_KEY));
     localStorage.removeItem(STORAGE_KEYS.MESSAGES);
     localStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (error) {
@@ -194,7 +223,7 @@ export const clearMessages = () => {
 
 export const hasStoredConfig = () => {
   try {
-    return localStorage.getItem(STORAGE_KEYS.CONFIG) !== null;
+    return localStorage.getItem(getScopedStorageKey(STORAGE_KEYS.CONFIG)) !== null;
   } catch (error) {
     console.error('检查配置失败:', error);
     return false;
@@ -203,7 +232,7 @@ export const hasStoredConfig = () => {
 
 export const getConfigTimestamp = () => {
   try {
-    const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
+    const savedConfig = localStorage.getItem(getScopedStorageKey(STORAGE_KEYS.CONFIG));
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
       return parsedConfig.timestamp || null;

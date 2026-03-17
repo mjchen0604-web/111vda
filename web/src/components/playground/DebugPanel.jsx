@@ -155,7 +155,7 @@ const DebugPanel = ({
             tab={
               <div className='flex items-center gap-2'>
                 <Send size={16} />
-                {t('实际请求体')}
+                {t('操练场实际请求体')}
               </div>
             }
             itemKey='request'
@@ -171,7 +171,7 @@ const DebugPanel = ({
             tab={
               <div className='flex items-center gap-2'>
                 <Zap size={16} />
-                {t('真实 API 注入状态')}
+                {t('真实 API 注入预览')}
               </div>
             }
             itemKey='defaults'
