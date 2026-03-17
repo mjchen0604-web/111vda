@@ -101,8 +101,6 @@ const Playground = () => {
   const [previewPayload, setPreviewPayload] = useState(null);
   const [applyPromptToRealAPI, setApplyPromptToRealAPI] = useState(false);
   const [applyModelConfigToRealAPI, setApplyModelConfigToRealAPI] = useState(false);
-  const applyToRealAPI = applyPromptToRealAPI;
-  const setApplyToRealAPI = setApplyPromptToRealAPI;
   const [featureFlags, setFeatureFlags] = useState({
     debugVisibility: 'off',
     customRequestVisibility: 'off',
@@ -174,77 +172,6 @@ const Playground = () => {
     }
   }, [applyRemoteDefaults, isAdminUser]);
 
-  const saveScopedDefaults = useCallback(
-    async (scope) => {
-      try {
-        const res = await API.post('/api/playground/config/defaults', {
-          scope,
-          config: {
-            inputs,
-            parameterEnabled,
-          },
-        });
-        if (!res.data?.success) {
-          throw new Error(res.data?.message || 'save failed');
-        }
-        showSuccess(
-          scope === 'admin' ? '已保存为管理员默认' : '已保存为全局默认',
-        );
-        await loadPlaygroundConfig();
-      } catch (error) {
-        showError(error);
-      }
-    },
-    [inputs, parameterEnabled, loadPlaygroundConfig],
-  );
-
-  const saveGlobalPromptPreset = useCallback(
-    async (mode) => {
-      const config =
-        mode === 'native-empty'
-          ? {
-              inputs: {
-                promptMode: 'native',
-                systemPrompt: '',
-              },
-            }
-          : {
-              inputs: {
-                promptMode: 'default',
-                systemPrompt: '',
-              },
-            };
-
-      try {
-        const [res, applyRes] = await Promise.all([
-          API.post('/api/playground/config/defaults', {
-            scope: 'global',
-            config,
-          }),
-          API.post('/api/playground/config/apply', {
-            scope: 'global',
-            enabled: true,
-          }),
-        ]);
-        if (!res.data?.success) {
-          throw new Error(res.data?.message || 'save failed');
-        }
-        if (!applyRes.data?.success) {
-          throw new Error(applyRes.data?.message || 'save apply failed');
-        }
-        showSuccess(
-          mode === 'native-empty'
-            ? '已切换全局默认为空提示词'
-            : '已切换全局默认为内置提示词',
-        );
-        await loadPlaygroundConfig();
-      } catch (error) {
-        showError(error);
-      }
-    },
-    [loadPlaygroundConfig],
-  );
-
   const savePersonalDefaults = useCallback(async () => {
     const res = await API.post('/api/playground/config/defaults', {
       scope: 'personal',
@@ -272,8 +199,12 @@ const Playground = () => {
         if (!res.data?.success) {
           throw new Error(res.data?.message || 'save failed');
         }
-        setApplyToRealAPI(enabled);
-        showSuccess(enabled ? '真实 API 默认注入已开启' : '真实 API 默认注入已关闭');
+        setApplyPromptToRealAPI(enabled);
+        showSuccess(
+          enabled
+            ? '已开启真实应用提示词配置'
+            : '已关闭真实应用提示词配置',
+        );
       } catch (error) {
         showError(error);
       }
@@ -296,7 +227,11 @@ const Playground = () => {
           throw new Error(res.data?.message || 'save failed');
         }
         setApplyModelConfigToRealAPI(enabled);
-        showSuccess(enabled ? '真实应用模型配置已开启' : '真实应用模型配置已关闭');
+        showSuccess(
+          enabled
+            ? '已开启真实应用模型配置'
+            : '已关闭真实应用模型配置',
+        );
       } catch (error) {
         showError(error);
       }
@@ -739,11 +674,6 @@ const Playground = () => {
                 applyModelConfigToRealAPI={applyModelConfigToRealAPI}
                 onApplyModelConfigToRealAPIChange={saveApplyModelConfigToRealAPI}
                 onPromptModeChange={handlePromptModeChange}
-                effectHint={
-                  applyModelConfigToRealAPI
-                    ? t('这些配置会直接作用于 Playground 请求；未显式传参的真实 API 请求也会继承这 5 个默认参数。')
-                    : t('这些配置会直接作用于 Playground 发出的真实 API 请求。')
-                }
               />
             </Layout.Sider>
           )}

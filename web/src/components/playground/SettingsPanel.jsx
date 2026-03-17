@@ -20,7 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Button, Card, Select, Switch, TextArea, Typography } from '@douyinfe/semi-ui';
 import { Bug, Settings, Sparkles, ToggleLeft, Users, X } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
 import { renderGroupOption, selectFilter } from '../../helpers';
 import ConfigManager from './ConfigManager';
 import CustomRequestEditor from './CustomRequestEditor';
@@ -52,19 +51,19 @@ const SettingsPanel = ({
   onCustomRequestModeChange,
   onCustomRequestBodyChange,
   previewPayload,
-  effectHint,
   applyPromptToRealAPI,
   onApplyPromptToRealAPIChange,
   applyModelConfigToRealAPI,
   onApplyModelConfigToRealAPIChange,
   onPromptModeChange,
 }) => {
-  const { t } = useTranslation();
-
   const currentConfig = {
     inputs,
     parameterEnabled,
   };
+
+  const promptInputLocked =
+    inputs.promptMode !== 'native' || applyPromptToRealAPI;
 
   return (
     <Card
@@ -83,7 +82,7 @@ const SettingsPanel = ({
             <Settings size={20} className='text-white' />
           </div>
           <Typography.Title heading={5} className='mb-0'>
-            {t('模型配置')}
+            模型配置
           </Typography.Title>
         </div>
 
@@ -116,11 +115,11 @@ const SettingsPanel = ({
           <div className='flex items-center gap-2 mb-2'>
             <Users size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              {t('分组')}
+              分组
             </Typography.Text>
           </div>
           <Select
-            placeholder={t('请选择分组')}
+            placeholder='请选择分组'
             name='group'
             required
             selection
@@ -140,39 +139,11 @@ const SettingsPanel = ({
         <div className='space-y-3 rounded-xl border border-[var(--semi-color-border)] p-3'>
           <div>
             <Typography.Text strong className='text-sm'>
-              {t('提示词模式')}
+              提示词模式
             </Typography.Text>
             <Typography.Text className='text-xs text-gray-500 block mt-1'>
-              {t('默认模式使用内置基线提示词；原生格式使用空提示词或你自己填写的提示词。')}
+              默认模式使用内置聊天基线提示词；原生格式只使用空提示词或你手动填写的提示词。
             </Typography.Text>
-          </div>
-
-          <div className='flex items-center justify-between gap-3'>
-            <Typography.Text strong className='text-sm'>
-              {t('是否真实应用')}
-            </Typography.Text>
-            <Switch
-              checked={applyPromptToRealAPI}
-              onChange={onApplyPromptToRealAPIChange}
-              checkedText={t('开')}
-              uncheckedText={t('关')}
-              size='small'
-            />
-          </div>
-
-          <div className='flex items-center justify-between gap-3'>
-            <Typography.Text className='text-xs text-gray-500'>
-              {applyModelConfigToRealAPI
-                ? t('模型配置这五个参数会带到真实请求体')
-                : t('模型配置这五个参数不会带到真实请求体')}
-            </Typography.Text>
-            <Switch
-              checked={applyModelConfigToRealAPI}
-              onChange={onApplyModelConfigToRealAPIChange}
-              checkedText={t('开')}
-              uncheckedText={t('关')}
-              size='small'
-            />
           </div>
 
           <div className='grid grid-cols-2 gap-2'>
@@ -182,7 +153,7 @@ const SettingsPanel = ({
               onClick={() => onPromptModeChange('default')}
               className='!rounded-lg'
             >
-              {t('默认')}
+              默认
             </Button>
             <Button
               theme={inputs.promptMode === 'native' ? 'solid' : 'light'}
@@ -190,26 +161,44 @@ const SettingsPanel = ({
               onClick={() => onPromptModeChange('native')}
               className='!rounded-lg'
             >
-              {t('原生格式')}
+              原生格式
             </Button>
+          </div>
+
+          <div className='flex items-center justify-between gap-3'>
+            <div>
+              <Typography.Text strong className='text-sm'>
+                是否真实应用
+              </Typography.Text>
+              <Typography.Text className='text-xs text-gray-500 block mt-1'>
+                开启后，当前提示词模式和自定义提示词会带到真实请求；关闭后只在操练场本地生效。
+              </Typography.Text>
+            </div>
+            <Switch
+              checked={applyPromptToRealAPI}
+              onChange={onApplyPromptToRealAPIChange}
+              checkedText='开'
+              uncheckedText='关'
+              size='small'
+            />
           </div>
 
           <TextArea
             value={inputs.systemPrompt || ''}
             onChange={(value) => onInputChange('systemPrompt', value)}
-            disabled={inputs.promptMode !== 'native' || applyPromptToRealAPI}
+            disabled={promptInputLocked}
             autosize={{ minRows: 4, maxRows: 10 }}
-            placeholder={t('原生格式下可填写自定义提示词；留空则使用空提示词。')}
+            placeholder='原生格式下可填写自定义提示词；留空则使用空提示词。开启真实应用后这里会锁定，关闭后才能继续编辑。'
             className='!rounded-lg'
           />
 
           {adminControls?.enabled && (
             <div className='rounded-lg bg-[var(--semi-color-fill-0)] p-3'>
               <Typography.Text strong className='text-sm block mb-2'>
-                {t('管理员全局提示词快捷切换')}
+                管理员全局提示词快捷切换
               </Typography.Text>
               <Typography.Text className='text-xs text-gray-500 block mb-3'>
-                {t('点击哪边就把全局默认提示词保存到哪边，并同步当前上方显示。')}
+                点击哪边，就把全局默认提示词切到哪边，并同步上方当前选中的状态。
               </Typography.Text>
               <div className='grid grid-cols-2 gap-2'>
                 <Button
@@ -218,7 +207,7 @@ const SettingsPanel = ({
                   onClick={() => adminControls.onSaveGlobalPromptPreset?.('default')}
                   className='!rounded-lg'
                 >
-                  {t('全局默认提示词')}
+                  全局默认提示词
                 </Button>
                 <Button
                   theme='outline'
@@ -226,7 +215,7 @@ const SettingsPanel = ({
                   onClick={() => adminControls.onSaveGlobalPromptPreset?.('native-empty')}
                   className='!rounded-lg'
                 >
-                  {t('全局空提示词')}
+                  全局空提示词
                 </Button>
               </div>
             </div>
@@ -237,11 +226,11 @@ const SettingsPanel = ({
           <div className='flex items-center gap-2 mb-2'>
             <Sparkles size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              {t('模型')}
+              模型
             </Typography.Text>
           </div>
           <Select
-            placeholder={t('请选择模型')}
+            placeholder='请选择模型'
             name='model'
             required
             selection
@@ -255,29 +244,42 @@ const SettingsPanel = ({
             dropdownStyle={{ width: '100%', maxWidth: '100%' }}
             className='!rounded-lg'
           />
-          {effectHint && (
-            <Typography.Text className='text-xs text-gray-500 mt-2 block'>
-              {effectHint}
-            </Typography.Text>
-          )}
         </div>
 
-        <div>
-          <ImageUrlInput
-            imageUrls={inputs.imageUrls}
-            imageEnabled={inputs.imageEnabled}
-            onImageUrlsChange={(urls) => onInputChange('imageUrls', urls)}
-            onImageEnabledChange={(enabled) => onInputChange('imageEnabled', enabled)}
-          />
-        </div>
+        <ImageUrlInput
+          imageUrls={inputs.imageUrls}
+          imageEnabled={inputs.imageEnabled}
+          onImageUrlsChange={(urls) => onInputChange('imageUrls', urls)}
+          onImageEnabledChange={(enabled) => onInputChange('imageEnabled', enabled)}
+        />
 
-        <div>
+        <div className='space-y-3 rounded-xl border border-[var(--semi-color-border)] p-3'>
+          <Typography.Text strong className='text-sm'>
+            模型配置
+          </Typography.Text>
           <ParameterControl
             inputs={inputs}
             parameterEnabled={parameterEnabled}
             onInputChange={onInputChange}
             onParameterToggle={onParameterToggle}
           />
+          <div className='flex items-center justify-between gap-3 pt-1'>
+            <div>
+              <Typography.Text strong className='text-sm'>
+                模型配置这五个参数带到真实请求体
+              </Typography.Text>
+              <Typography.Text className='text-xs text-gray-500 block mt-1'>
+                开启后，Temperature、Top P、Frequency Penalty、Presence Penalty、Seed 会注入真实请求；关闭后只在操练场本地生效。
+              </Typography.Text>
+            </div>
+            <Switch
+              checked={applyModelConfigToRealAPI}
+              onChange={onApplyModelConfigToRealAPIChange}
+              checkedText='开'
+              uncheckedText='关'
+              size='small'
+            />
+          </div>
         </div>
 
         {adminControls?.enabled && (
@@ -285,12 +287,12 @@ const SettingsPanel = ({
             <div className='flex items-center gap-2'>
               <Bug size={16} className='text-gray-500' />
               <Typography.Text strong className='text-sm'>
-                {t('实验功能可见性')}
+                实验功能可见性
               </Typography.Text>
             </div>
             <div>
               <Typography.Text className='text-xs text-gray-500 mb-2 block'>
-                {t('调试信息')}
+                调试信息
               </Typography.Text>
               <Select
                 value={adminControls.debugVisibility}
@@ -301,12 +303,14 @@ const SettingsPanel = ({
             </div>
             <div>
               <Typography.Text className='text-xs text-gray-500 mb-2 block'>
-                {t('自定义请求体模式')}
+                自定义请求体模式
               </Typography.Text>
               <Select
                 value={adminControls.customRequestVisibility}
                 optionList={VISIBILITY_OPTIONS}
-                onChange={(value) => adminControls.onSaveVisibility?.('custom_request', value)}
+                onChange={(value) =>
+                  adminControls.onSaveVisibility?.('custom_request', value)
+                }
                 className='!rounded-lg'
               />
             </div>
@@ -328,14 +332,14 @@ const SettingsPanel = ({
             <div className='flex items-center gap-2'>
               <ToggleLeft size={16} className='text-gray-500' />
               <Typography.Text strong className='text-sm'>
-                {t('流式输出')}
+                流式输出
               </Typography.Text>
             </div>
             <Switch
               checked={inputs.stream}
               onChange={(checked) => onInputChange('stream', checked)}
-              checkedText={t('开')}
-              uncheckedText={t('关')}
+              checkedText='开'
+              uncheckedText='关'
               size='small'
             />
           </div>

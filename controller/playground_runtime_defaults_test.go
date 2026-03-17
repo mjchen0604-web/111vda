@@ -149,7 +149,8 @@ func TestBuildPlaygroundRuntimePreviewMergesScopes(t *testing.T) {
 	}
 
 	seedPlaygroundUser(t, db, 1, common.RoleAdminUser, dto.UserSetting{
-		PlaygroundApplyToRealAPI: boolPtr(true),
+		PlaygroundApplyPromptToRealAPI:      boolPtr(true),
+		PlaygroundApplyModelConfigToRealAPI: boolPtr(true),
 		PlaygroundDefaults: map[string]any{
 			"inputs": map[string]any{
 				"temperature": 0.2,
@@ -203,7 +204,7 @@ func TestApplyPlaygroundRuntimeDefaultsFromStoredScopes(t *testing.T) {
 	}
 
 	seedPlaygroundUser(t, db, 2, common.RoleAdminUser, dto.UserSetting{
-		PlaygroundApplyToRealAPI: boolPtr(true),
+		PlaygroundApplyModelConfigToRealAPI: boolPtr(true),
 		PlaygroundDefaults: map[string]any{
 			"inputs": map[string]any{
 				"temperature": 0.25,
@@ -241,15 +242,8 @@ func TestApplyPlaygroundRuntimeDefaultsFromStoredScopes(t *testing.T) {
 func TestBuildPlaygroundRuntimePreviewApplyToRealAPIPrecedence(t *testing.T) {
 	db := setupPlaygroundDefaultsTestDB(t)
 
-	if err := model.UpdateOption("PlaygroundGlobalApplyToRealAPI", "true"); err != nil {
-		t.Fatalf("failed to save global apply setting: %v", err)
-	}
-	if err := model.UpdateOption("PlaygroundAdminApplyToRealAPI", "false"); err != nil {
-		t.Fatalf("failed to save admin apply setting: %v", err)
-	}
-
 	seedPlaygroundUser(t, db, 3, common.RoleAdminUser, dto.UserSetting{
-		PlaygroundApplyToRealAPI: boolPtr(true),
+		PlaygroundApplyPromptToRealAPI: boolPtr(true),
 	})
 
 	recorder := httptest.NewRecorder()
@@ -273,7 +267,7 @@ func TestBuildPlaygroundRuntimePreviewApplyToRealAPIGlobalDefaultOn(t *testing.T
 	ctx.Set("role", common.RoleCommonUser)
 
 	preview := buildPlaygroundRuntimePreview(ctx)
-	if preview["applyToRealAPI"] != true {
-		t.Fatalf("expected global default applyToRealAPI=true, got %#v", preview["applyToRealAPI"])
+	if preview["applyToRealAPI"] != false {
+		t.Fatalf("expected default applyToRealAPI=false, got %#v", preview["applyToRealAPI"])
 	}
 }
