@@ -267,7 +267,7 @@ func TestBuildPlaygroundRuntimePreviewApplyToRealAPIGlobalDefaultOn(t *testing.T
 	ctx.Set("role", common.RoleCommonUser)
 
 	preview := buildPlaygroundRuntimePreview(ctx)
-	if preview["applyToRealAPI"] != false {
-		t.Fatalf("expected default applyToRealAPI=false, got %#v", preview["applyToRealAPI"])
+	if preview["applyToRealAPI"] != true {
+		t.Fatalf("expected default applyToRealAPI=true, got %#v", preview["applyToRealAPI"])
 	}
 }

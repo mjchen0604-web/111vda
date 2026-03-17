@@ -99,7 +99,7 @@ const Playground = () => {
   const [debugData, setDebugData] = useState(DEFAULT_DEBUG_DATA);
   const [activeDebugTab, setActiveDebugTab] = useState('preview');
   const [previewPayload, setPreviewPayload] = useState(null);
-  const [applyPromptToRealAPI, setApplyPromptToRealAPI] = useState(false);
+  const [applyPromptToRealAPI, setApplyPromptToRealAPI] = useState(true);
   const [applyModelConfigToRealAPI, setApplyModelConfigToRealAPI] = useState(false);
   const [featureFlags, setFeatureFlags] = useState({
     debugVisibility: 'off',

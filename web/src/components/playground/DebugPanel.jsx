@@ -171,7 +171,7 @@ const DebugPanel = ({
             tab={
               <div className='flex items-center gap-2'>
                 <Zap size={16} />
-                {t('真实 API 默认注入')}
+                {t('真实 API 注入状态')}
               </div>
             }
             itemKey='defaults'

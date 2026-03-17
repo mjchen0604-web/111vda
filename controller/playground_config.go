@@ -303,8 +303,11 @@ func SavePlaygroundApplyToRealAPI(c *gin.Context) {
 }
 
 func resolvePlaygroundApplyFlags(userSettings dto.UserSetting) (bool, bool) {
-	applyPrompt := false
+	applyPrompt := true
 	applyModelConfig := false
+	if userSettings.PlaygroundApplyToRealAPI != nil {
+		applyPrompt = *userSettings.PlaygroundApplyToRealAPI
+	}
 	if userSettings.PlaygroundApplyPromptToRealAPI != nil {
 		applyPrompt = *userSettings.PlaygroundApplyPromptToRealAPI
 	}
