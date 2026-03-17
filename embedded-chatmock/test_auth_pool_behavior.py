@@ -9,10 +9,21 @@ from pathlib import Path
 CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
-from chatmock.utils import _dedupe_candidates_by_account_id, _parse_auth_files_env
+from chatmock.utils import (
+    ManagedAuthUpstream,
+    _dedupe_candidates_by_account_id,
+    _parse_auth_files_env,
+    _preferred_chatgpt_auth_candidate_for_session,
+    bind_chatgpt_auth_session,
+    clear_chatgpt_auth_session_binding,
+    get_chatgpt_auth_session_binding,
+)
 
 
 class AuthPoolBehaviorTests(unittest.TestCase):
+    def tearDown(self):
+        clear_chatgpt_auth_session_binding("sess-sticky")
+
     def test_same_account_id_with_different_sources_is_not_deduped(self):
         candidates = [
             {
@@ -55,6 +66,30 @@ class AuthPoolBehaviorTests(unittest.TestCase):
                 os.environ.pop("CHATMOCK_DATA_DIR", None)
             else:
                 os.environ["CHATMOCK_DATA_DIR"] = original_data_dir
+
+    def test_session_sticky_prefers_bound_candidate(self):
+        candidates = [
+            {"label": "acc01/auth.json", "account_id": "acc01"},
+            {"label": "acc02/auth.json", "account_id": "acc02"},
+        ]
+        bind_chatgpt_auth_session("sess-sticky", candidates[1])
+        preferred = _preferred_chatgpt_auth_candidate_for_session(candidates, "sess-sticky")
+        self.assertIsNotNone(preferred)
+        self.assertEqual(preferred["account_id"], "acc02")
+
+    def test_managed_upstream_success_binds_session(self):
+        class DummyUpstream:
+            status_code = 200
+
+            def close(self):
+                return None
+
+        candidate = {"label": "acc01/auth.json", "account_id": "acc01"}
+        upstream = ManagedAuthUpstream(DummyUpstream(), candidate, session_id="sess-sticky")
+        upstream.mark_success()
+        binding = get_chatgpt_auth_session_binding("sess-sticky")
+        self.assertIsNotNone(binding)
+        self.assertEqual(binding["account_id"], "acc01")
 
 if __name__ == "__main__":
     unittest.main()

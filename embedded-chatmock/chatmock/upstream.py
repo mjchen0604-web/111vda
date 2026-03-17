@@ -181,6 +181,7 @@ def _start_chatgpt_backend_request(
             candidate = claim_chatgpt_auth_candidate(
                 ensure_fresh=True,
                 excluded_labels=tried_labels,
+                session_id=session_id,
             )
             if not isinstance(candidate, dict):
                 break
@@ -240,7 +241,7 @@ def _start_chatgpt_backend_request(
                     continue
                 return upstream, None
 
-            return ManagedAuthUpstream(upstream, candidate), None
+            return ManagedAuthUpstream(upstream, candidate, session_id=session_id), None
 
     if last_upstream is not None:
         return last_upstream, None

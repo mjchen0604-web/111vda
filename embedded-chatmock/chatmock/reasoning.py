@@ -170,6 +170,8 @@ def public_service_tier_name(service_tier: str | None) -> str | None:
     if not isinstance(service_tier, str) or not service_tier.strip():
         return None
     normalized = service_tier.strip().lower()
+    if normalized in ("fast", "priority"):
+        return "priority"
     return normalized
 
 

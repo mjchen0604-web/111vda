@@ -36,6 +36,9 @@ _AUTH_ACCOUNT_COOLDOWN_LOCK = threading.RLock()
 _AUTH_ACCOUNT_COOLDOWN_UNTIL: Dict[str, float] = {}
 _AUTH_INFLIGHT_LOCK = threading.RLock()
 _AUTH_INFLIGHT_COUNTS: Dict[str, int] = {}
+_AUTH_SESSION_STICKY_LOCK = threading.RLock()
+_AUTH_SESSION_STICKY: Dict[str, Dict[str, Any]] = {}
+_AUTH_SESSION_STICKY_MAX = 10000
 
 
 def eprint(*args, **kwargs) -> None:
@@ -113,10 +116,24 @@ class RetryableStreamError(RuntimeError):
         super().__init__(str((error_info or {}).get("raw_message") or "retryable stream failure"))
 
 
+def _mark_upstream_failure(upstream: Any, error_info: Dict[str, Any] | None = None) -> None:
+    if upstream is None or not hasattr(upstream, "mark_failure"):
+        return
+    info = error_info if isinstance(error_info, dict) else {}
+    raw_message = str(info.get("raw_message") or "").strip()
+    raw_status = info.get("raw_status") if isinstance(info.get("raw_status"), int) else None
+    classification = classify_error(info) if info else "generic_failure"
+    try:
+        upstream.mark_failure(raw_message, status_code=raw_status, classification=classification)
+    except Exception:
+        pass
+
+
 class ManagedAuthUpstream:
-    def __init__(self, upstream: Any, candidate: Dict[str, Any]) -> None:
+    def __init__(self, upstream: Any, candidate: Dict[str, Any], session_id: str | None = None) -> None:
         self._upstream = upstream
         self._candidate = dict(candidate or {})
+        self._session_id = str(session_id or "").strip() or None
         self._released = False
         self._marked = False
 
@@ -138,6 +155,29 @@ class ManagedAuthUpstream:
             success=True,
             status_code=int(getattr(self._upstream, "status_code", 200) or 200),
             account_id=str(self._candidate.get("account_id") or "").strip(),
+        )
+        bind_chatgpt_auth_session(self._session_id, self._candidate)
+
+    def mark_success(self) -> None:
+        self._mark_success()
+
+    def mark_failure(self, error_message: str = "", status_code: int | None = None, classification: str | None = None) -> None:
+        if self._marked:
+            return
+        self._marked = True
+        clear_chatgpt_auth_session_binding(self._session_id)
+        effective_status = status_code
+        if not isinstance(effective_status, int) or effective_status < 400:
+            effective_status = int(getattr(self._upstream, "status_code", 0) or 0)
+        if not isinstance(effective_status, int) or effective_status < 400:
+            effective_status = 502
+        mark_chatgpt_auth_result(
+            str(self._candidate.get("label") or "").strip(),
+            success=False,
+            status_code=effective_status,
+            account_id=str(self._candidate.get("account_id") or "").strip(),
+            error_message=error_message,
+            classification=classification or "generic_failure",
         )
 
     def close(self) -> None:
@@ -163,6 +203,108 @@ def get_home_dir() -> str:
     if not home:
         home = os.path.expanduser("~/.chatgpt-local")
     return home
+
+
+def _session_sticky_enabled() -> bool:
+    raw = (os.getenv("CHATGPT_LOCAL_SESSION_STICKY_ENABLED") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _session_sticky_ttl_seconds() -> int:
+    raw = (os.getenv("CHATGPT_LOCAL_SESSION_STICKY_TTL_SECONDS") or "1800").strip()
+    try:
+        value = int(raw)
+    except Exception:
+        value = 1800
+    return max(60, min(86400, value))
+
+
+def _prune_chatgpt_auth_session_bindings(now: float | None = None) -> None:
+    if not _AUTH_SESSION_STICKY:
+        return
+    current = float(now if isinstance(now, (int, float)) else time.time())
+    ttl = _session_sticky_ttl_seconds()
+    expired: List[str] = []
+    for session_id, record in list(_AUTH_SESSION_STICKY.items()):
+        updated_at = float(record.get("updated_at") or 0.0)
+        if updated_at <= 0 or current-updated_at > ttl:
+            expired.append(session_id)
+    for session_id in expired:
+        _AUTH_SESSION_STICKY.pop(session_id, None)
+    if len(_AUTH_SESSION_STICKY) > _AUTH_SESSION_STICKY_MAX:
+        ordered = sorted(
+            _AUTH_SESSION_STICKY.items(),
+            key=lambda item: float((item[1] or {}).get("updated_at") or 0.0),
+        )
+        overflow = len(_AUTH_SESSION_STICKY) - _AUTH_SESSION_STICKY_MAX
+        for session_id, _ in ordered[:overflow]:
+            _AUTH_SESSION_STICKY.pop(session_id, None)
+
+
+def get_chatgpt_auth_session_binding(session_id: str | None) -> Dict[str, Any] | None:
+    if not _session_sticky_enabled():
+        return None
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return None
+    with _AUTH_SESSION_STICKY_LOCK:
+        _prune_chatgpt_auth_session_bindings()
+        record = _AUTH_SESSION_STICKY.get(normalized)
+        if not isinstance(record, dict):
+            return None
+        updated = dict(record)
+        updated["updated_at"] = time.time()
+        _AUTH_SESSION_STICKY[normalized] = updated
+        return dict(updated)
+
+
+def clear_chatgpt_auth_session_binding(session_id: str | None) -> None:
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return
+    with _AUTH_SESSION_STICKY_LOCK:
+        _AUTH_SESSION_STICKY.pop(normalized, None)
+
+
+def bind_chatgpt_auth_session(session_id: str | None, candidate: Dict[str, Any] | None) -> None:
+    if not _session_sticky_enabled():
+        return
+    normalized = str(session_id or "").strip()
+    if not normalized or not isinstance(candidate, dict):
+        return
+    label = str(candidate.get("label") or "").strip()
+    account_id = str(candidate.get("account_id") or "").strip()
+    if not label and not account_id:
+        return
+    with _AUTH_SESSION_STICKY_LOCK:
+        _prune_chatgpt_auth_session_bindings()
+        _AUTH_SESSION_STICKY[normalized] = {
+            "label": label,
+            "account_id": account_id,
+            "updated_at": time.time(),
+        }
+
+
+def _preferred_chatgpt_auth_candidate_for_session(
+    candidates: List[Dict[str, Any]],
+    session_id: str | None,
+) -> Dict[str, Any] | None:
+    binding = get_chatgpt_auth_session_binding(session_id)
+    if not isinstance(binding, dict):
+        return None
+    binding_label = str(binding.get("label") or "").strip()
+    binding_account_id = str(binding.get("account_id") or "").strip()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_label = str(candidate.get("label") or "").strip()
+        candidate_account_id = str(candidate.get("account_id") or "").strip()
+        if binding_label and candidate_label == binding_label:
+            return candidate
+        if binding_account_id and candidate_account_id == binding_account_id:
+            return candidate
+    clear_chatgpt_auth_session_binding(session_id)
+    return None
 
 
 def _candidate_auth_bases() -> List[str]:
@@ -1102,12 +1244,23 @@ def claim_chatgpt_auth_candidate(
     *,
     ensure_fresh: bool = True,
     excluded_labels: set[str] | None = None,
+    session_id: str | None = None,
 ) -> Dict[str, Any] | None:
     excluded = excluded_labels or set()
     candidates = get_effective_chatgpt_auth_candidates(ensure_fresh=ensure_fresh)
     candidates = [candidate for candidate in candidates if str(candidate.get("label") or "").strip() not in excluded]
     if not candidates:
         return None
+    sticky_candidate = _preferred_chatgpt_auth_candidate_for_session(candidates, session_id)
+    if isinstance(sticky_candidate, dict):
+        sticky_label = str(sticky_candidate.get("label") or "").strip()
+        prioritized: List[Dict[str, Any]] = [sticky_candidate]
+        for candidate in candidates:
+            candidate_label = str(candidate.get("label") or "").strip()
+            if sticky_label and candidate_label == sticky_label:
+                continue
+            prioritized.append(candidate)
+        candidates = prioritized
     limit = get_max_inflight_per_account()
     preferred = []
     fallback = []
@@ -1858,7 +2011,9 @@ def sse_translate_chat(
                     evt.get("response"),
                 )
                 if not has_visible_output and should_retry_next_candidate(error_info):
+                    _mark_upstream_failure(upstream, error_info)
                     raise RetryableStreamError(error_info)
+                _mark_upstream_failure(upstream, error_info)
                 chunk = {"error": normalized_error_payload(error_info)}
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -1932,7 +2087,9 @@ def sse_translate_chat(
             )
             if not has_visible_output and not sent_tool_finish:
                 if should_retry_next_candidate(error_info):
+                    _mark_upstream_failure(upstream, error_info)
                     raise RetryableStreamError(error_info)
+                _mark_upstream_failure(upstream, error_info)
                 chunk = {"error": error_info}
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -1959,7 +2116,9 @@ def sse_translate_chat(
             )
             if not has_visible_output and not sent_tool_finish:
                 if should_retry_next_candidate(error_info):
+                    _mark_upstream_failure(upstream, error_info)
                     raise RetryableStreamError(error_info)
+                _mark_upstream_failure(upstream, error_info)
                 chunk = {"error": error_info}
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -2132,7 +2291,9 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
                     evt.get("response"),
                 )
                 if not has_visible_output and should_retry_next_candidate(error_info):
+                    _mark_upstream_failure(upstream, error_info)
                     raise RetryableStreamError(error_info)
+                _mark_upstream_failure(upstream, error_info)
                 chunk = {"error": normalized_error_payload(error_info)}
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -2149,7 +2310,9 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
             )
             if not has_visible_output:
                 if should_retry_next_candidate(error_info):
+                    _mark_upstream_failure(upstream, error_info)
                     raise RetryableStreamError(error_info)
+                _mark_upstream_failure(upstream, error_info)
                 chunk = {"error": error_info}
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -2175,7 +2338,9 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
             )
             if not has_visible_output and not sent_tool_finish:
                 if should_retry_next_candidate(error_info):
+                    _mark_upstream_failure(upstream, error_info)
                     raise RetryableStreamError(error_info)
+                _mark_upstream_failure(upstream, error_info)
                 chunk = {"error": error_info}
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -2202,7 +2367,9 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
             )
             if not has_visible_output and not sent_tool_finish:
                 if should_retry_next_candidate(error_info):
+                    _mark_upstream_failure(upstream, error_info)
                     raise RetryableStreamError(error_info)
+                _mark_upstream_failure(upstream, error_info)
                 chunk = {"error": error_info}
                 yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
