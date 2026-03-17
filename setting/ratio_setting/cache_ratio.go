@@ -105,6 +105,7 @@ func addTieredCacheRatio(target map[string]float64, base string, ratio float64) 
 func init() {
 	addTieredCacheRatio(defaultCacheRatio, "gpt-5.4", 0.1)
 	addTieredCacheRatio(defaultCacheRatio, "gpt-5.4-fast", 0.1)
+	addTieredCacheRatio(defaultCacheRatio, "gpt-5.4-mini", 0.125)
 
 	for _, base := range []string{
 		"gpt-5.3-codex",

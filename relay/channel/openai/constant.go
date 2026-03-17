@@ -29,6 +29,7 @@ var ModelList = []string{
 	"o4-mini", "o4-mini-2025-04-16",
 	"o4-mini-deep-research", "o4-mini-deep-research-2025-06-26",
 	"gpt-5", "gpt-5-2025-08-07", "gpt-5-chat-latest",
+	"gpt-5.4-mini",
 	"gpt-5-mini", "gpt-5-mini-2025-08-07",
 	"gpt-5-nano", "gpt-5-nano-2025-08-07",
 	"gpt-4o-audio-preview", "gpt-4o-audio-preview-2024-10-01",

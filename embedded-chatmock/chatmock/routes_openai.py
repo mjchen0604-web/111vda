@@ -1158,6 +1158,7 @@ def list_models() -> Response:
         ("gpt-5.2", ["xhigh", "high", "medium", "low"]),
         ("gpt-5.4", ["xhigh", "high", "medium", "low"]),
         ("gpt-5.4-fast", ["xhigh", "high", "medium", "low"]),
+        ("gpt-5.4-mini", ["xhigh", "high", "medium", "low"]),
         ("gpt-5.3-codex", ["xhigh", "high", "medium", "low"]),
         ("gpt-5-codex", ["high", "medium", "low"]),
         ("gpt-5.2-codex", ["xhigh", "high", "medium", "low"]),

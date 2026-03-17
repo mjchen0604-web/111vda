@@ -632,6 +632,12 @@ export const calculateModelPrice = ({
         high: { input: 5.0, cache: 0.5, output: 37.5 },
         xhigh: { input: 5.0, cache: 0.5, output: 45.0 },
       },
+      'gpt-5.4-mini': {
+        low: { input: 0.2, cache: 0.025, output: 1.25 },
+        medium: { input: 0.2, cache: 0.025, output: 1.25 },
+        high: { input: 0.2, cache: 0.025, output: 1.25 },
+        xhigh: { input: 0.2, cache: 0.025, output: 1.25 },
+      },
       'gpt-5.3-codex': {
         low: { input: 1.75, cache: 0.175, output: 10.5 },
         medium: { input: 1.75, cache: 0.175, output: 14.0 },
