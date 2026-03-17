@@ -22,12 +22,13 @@ func (s *SimpleResponse) GetOpenAIError() *types.OpenAIError {
 }
 
 type TextResponse struct {
-	Id      string                     `json:"id"`
-	Object  string                     `json:"object"`
-	Created int64                      `json:"created"`
-	Model   string                     `json:"model"`
-	Choices []OpenAITextResponseChoice `json:"choices"`
-	Usage   `json:"usage"`
+	Id          string                     `json:"id"`
+	Object      string                     `json:"object"`
+	Created     int64                      `json:"created"`
+	Model       string                     `json:"model"`
+	ServiceTier string                     `json:"service_tier,omitempty"`
+	Choices     []OpenAITextResponseChoice `json:"choices"`
+	Usage       `json:"usage"`
 }
 
 type OpenAITextResponseChoice struct {
@@ -37,13 +38,14 @@ type OpenAITextResponseChoice struct {
 }
 
 type OpenAITextResponse struct {
-	Id      string                     `json:"id"`
-	Model   string                     `json:"model"`
-	Object  string                     `json:"object"`
-	Created any                        `json:"created"`
-	Choices []OpenAITextResponseChoice `json:"choices"`
-	Error   any                        `json:"error,omitempty"`
-	Usage   `json:"usage"`
+	Id          string                     `json:"id"`
+	Model       string                     `json:"model"`
+	Object      string                     `json:"object"`
+	Created     any                        `json:"created"`
+	ServiceTier string                     `json:"service_tier,omitempty"`
+	Choices     []OpenAITextResponseChoice `json:"choices"`
+	Error       any                        `json:"error,omitempty"`
+	Usage       `json:"usage"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构
@@ -143,6 +145,7 @@ type ChatCompletionsStreamResponse struct {
 	Object            string                                `json:"object"`
 	Created           int64                                 `json:"created"`
 	Model             string                                `json:"model"`
+	ServiceTier       string                                `json:"service_tier,omitempty"`
 	SystemFingerprint *string                               `json:"system_fingerprint"`
 	Choices           []ChatCompletionsStreamResponseChoice `json:"choices"`
 	Usage             *Usage                                `json:"usage"`
@@ -190,6 +193,7 @@ func (c *ChatCompletionsStreamResponse) Copy() *ChatCompletionsStreamResponse {
 		Object:            c.Object,
 		Created:           c.Created,
 		Model:             c.Model,
+		ServiceTier:       c.ServiceTier,
 		SystemFingerprint: c.SystemFingerprint,
 		Choices:           choices,
 		Usage:             c.Usage,

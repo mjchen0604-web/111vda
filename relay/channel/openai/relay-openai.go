@@ -27,7 +27,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 		return nil
 	}
 
-	if !forceFormat && !thinkToContent {
+	if !forceFormat && !thinkToContent && !shouldPresentPriorityServiceTier(info) {
 		return helper.StringData(c, data)
 	}
 
@@ -35,6 +35,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	if err := common.UnmarshalJsonStr(data, &lastStreamResponse); err != nil {
 		return err
 	}
+	applyPresentedServiceTierToStream(info, &lastStreamResponse)
 
 	if !thinkToContent {
 		return helper.ObjectData(c, lastStreamResponse)
@@ -224,6 +225,8 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	applyPresentedServiceTierToChatResponse(info, &simpleResponse)
+	responseBody = patchServiceTierInOpenAIResponseBody(info, responseBody)
 
 	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)

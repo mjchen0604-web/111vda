@@ -18,6 +18,86 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func isPriorityLikeServiceTier(value string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	return normalized == "priority" || normalized == "fast"
+}
+
+func rawMessageHasPriorityLikeServiceTier(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var text string
+	if err := common.Unmarshal(raw, &text); err == nil {
+		return isPriorityLikeServiceTier(text)
+	}
+	return false
+}
+
+func shouldPresentPriorityServiceTier(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(strings.TrimSpace(info.OriginModelName)), "-fast") {
+		return true
+	}
+	switch req := info.Request.(type) {
+	case *dto.GeneralOpenAIRequest:
+		return rawMessageHasPriorityLikeServiceTier(req.ServiceTier)
+	case *dto.OpenAIResponsesRequest:
+		return isPriorityLikeServiceTier(req.ServiceTier)
+	case *dto.ClaudeRequest:
+		return isPriorityLikeServiceTier(req.ServiceTier)
+	default:
+		return false
+	}
+}
+
+func normalizePresentedServiceTier(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", "auto", "default", "fast", "priority":
+		return "priority"
+	default:
+		return value
+	}
+}
+
+func applyPresentedServiceTierToStream(info *relaycommon.RelayInfo, streamResponse *dto.ChatCompletionsStreamResponse) {
+	if streamResponse == nil || !shouldPresentPriorityServiceTier(info) {
+		return
+	}
+	streamResponse.ServiceTier = normalizePresentedServiceTier(streamResponse.ServiceTier)
+}
+
+func applyPresentedServiceTierToChatResponse(info *relaycommon.RelayInfo, chatResponse *dto.OpenAITextResponse) {
+	if chatResponse == nil || !shouldPresentPriorityServiceTier(info) {
+		return
+	}
+	chatResponse.ServiceTier = normalizePresentedServiceTier(chatResponse.ServiceTier)
+}
+
+func patchServiceTierInOpenAIResponseBody(info *relaycommon.RelayInfo, responseBody []byte) []byte {
+	if !shouldPresentPriorityServiceTier(info) || len(responseBody) == 0 {
+		return responseBody
+	}
+	var bodyMap map[string]any
+	if err := common.Unmarshal(responseBody, &bodyMap); err != nil {
+		return responseBody
+	}
+	currentTier := strings.TrimSpace(strings.ToLower(common.Interface2String(bodyMap["service_tier"])))
+	switch currentTier {
+	case "", "auto", "default", "fast", "priority":
+		bodyMap["service_tier"] = "priority"
+	default:
+		return responseBody
+	}
+	patched, err := common.Marshal(bodyMap)
+	if err != nil {
+		return responseBody
+	}
+	return patched
+}
+
 // 辅助函数
 func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
 	info.SendResponseCount++
