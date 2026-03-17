@@ -758,7 +758,8 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	originUser, err := model.GetUserById(id, true)
+	var originUser model.User
+	err = model.DB.Unscoped().Select("id", "role").First(&originUser, "id = ?", id).Error
 	if err != nil {
 		common.ApiError(c, err)
 		return
