@@ -1441,17 +1441,18 @@ def mark_chatgpt_auth_result(
     with _AUTH_POOL_STATE_LOCK:
         state = dict(_AUTH_POOL_STATE.get(label) or {})
         if success:
+            effective_success_status = status_code if isinstance(status_code, int) and 200 <= status_code < 400 else 200
             _clear_invalid_auth_candidate(label=label)
             _set_auth_pool_state(
                 label,
                 status="ready",
                 cooldown_until=0.0,
                 failures=0,
-                last_status=status_code if isinstance(status_code, int) else 200,
+                last_status=effective_success_status,
                 last_error="",
                 classification="ready",
-                raw_code=raw_code,
-                raw_message=raw_message,
+                raw_code="",
+                raw_message="",
             )
             return
 
@@ -1958,17 +1959,15 @@ def probe_chatgpt_auth_candidates_and_quarantine_invalid() -> Dict[str, Any]:
                 quarantined += 1
                 detail["quarantined"] = True
         elif candidate is not None:
-            if classification in ("insufficient_balance", "rate_limited"):
-                handle_chatgpt_candidate_failure(candidate, info)
-            else:
+            if isinstance(status, int) and 200 <= status < 400:
                 mark_chatgpt_auth_result(
                     label,
                     success=True,
-                    status_code=status if isinstance(status, int) and status > 0 else 200,
+                    status_code=status,
                     account_id=str(candidate.get("account_id") or "").strip(),
-                    raw_code=raw_code or None,
-                    raw_message=message or None,
                 )
+            else:
+                handle_chatgpt_candidate_failure(candidate, info)
 
         details.append(detail)
 

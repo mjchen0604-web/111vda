@@ -15,6 +15,7 @@ from chatmock.utils import (
     _clear_invalid_auth_candidate,
     _dedupe_candidates_by_account_id,
     _remove_label_state,
+    _state_for_label,
     _parse_auth_files_env,
     _preferred_chatgpt_auth_candidate_for_session,
     bind_chatgpt_auth_session,
@@ -22,6 +23,7 @@ from chatmock.utils import (
     get_chatgpt_auth_session_binding,
     handle_chatgpt_candidate_failure,
     is_auth_candidate_blocked,
+    mark_chatgpt_auth_result,
     probe_chatgpt_auth_candidates_and_quarantine_invalid,
     remove_chatgpt_auth_candidate,
 )
@@ -212,6 +214,21 @@ class AuthPoolBehaviorTests(unittest.TestCase):
                 os.environ.pop("CHATMOCK_DASHBOARD_SETTINGS_PATH", None)
             else:
                 os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = original_settings_path
+
+    def test_success_writeback_normalizes_non_2xx_status_to_ready_200(self):
+        mark_chatgpt_auth_result(
+            "acc01/auth.json",
+            success=True,
+            status_code=402,
+            raw_code="something_old",
+            raw_message="old error",
+        )
+        state = _state_for_label("acc01/auth.json")
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["last_status"], 200)
+        self.assertEqual(state["last_classification"], "ready")
+        self.assertEqual(state["last_raw_code"], "")
+        self.assertEqual(state["last_raw_message"], "")
 
 if __name__ == "__main__":
     unittest.main()
