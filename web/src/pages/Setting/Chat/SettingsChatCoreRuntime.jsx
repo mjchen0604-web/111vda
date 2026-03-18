@@ -101,9 +101,12 @@ export default function SettingsChatCoreRuntime() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [probing, setProbing] = useState(false);
+  const [sweeping, setSweeping] = useState(false);
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
   const [health, setHealth] = useState(null);
   const [accounts, setAccounts] = useState([]);
+  const [runtimeCandidates, setRuntimeCandidates] = useState({ count: 0, rawCount: 0, candidates: [], excluded: [] });
   const [models, setModels] = useState([]);
   const [configText, setConfigText] = useState('');
   const [settingsPath, setSettingsPath] = useState('');
@@ -144,6 +147,61 @@ export default function SettingsChatCoreRuntime() {
     [],
   );
 
+  const runtimeCandidateColumns = useMemo(
+    () => [
+      { title: '标签', dataIndex: 'label', render: (_, record) => safeText(record.label) },
+      { title: '账号 ID', dataIndex: 'account_id', render: (_, record) => safeText(record.account_id) },
+      { title: 'Plan', dataIndex: 'plan', render: (_, record) => safeText(record.plan) },
+      { title: '空间', dataIndex: 'workspace_display', render: (_, record) => safeText(record.workspace_display) },
+      {
+        title: '状态',
+        dataIndex: 'status',
+        render: (_, record) =>
+          safeText(
+            [
+              record.status,
+              record.last_classification,
+              Number(record.cooldown_remaining || 0) > 0
+                ? `cooldown ${record.cooldown_remaining}s`
+                : '',
+              Boolean(record.sticky_bound) ? `sticky ${record.sticky_sessions || 0}` : '',
+            ]
+              .filter(Boolean)
+              .join(' | '),
+          ),
+      },
+      { title: '来源文件', dataIndex: 'source', render: (_, record) => safeText(record.source) },
+    ],
+    [],
+  );
+
+  const excludedCandidateColumns = useMemo(
+    () => [
+      { title: '标签', dataIndex: 'label', render: (_, record) => safeText(record.label) },
+      { title: '账号 ID', dataIndex: 'account_id', render: (_, record) => safeText(record.account_id) },
+      { title: '排除原因', dataIndex: 'excluded_reason', render: (_, record) => safeText(record.excluded_reason) },
+      {
+        title: '状态',
+        dataIndex: 'status',
+        render: (_, record) =>
+          safeText(
+            [
+              record.status,
+              record.last_classification,
+              record.last_raw_code,
+              Number(record.cooldown_remaining || 0) > 0
+                ? `cooldown ${record.cooldown_remaining}s`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' | '),
+          ),
+      },
+      { title: '来源文件', dataIndex: 'source', render: (_, record) => safeText(record.source) },
+    ],
+    [],
+  );
+
   const getErrorMessage = (error, fallback) =>
     error?.response?.data?.message ||
     error?.response?.data?.error ||
@@ -153,11 +211,14 @@ export default function SettingsChatCoreRuntime() {
   const fetchRuntimeState = async () => {
     setLoading(true);
     try {
-      const [healthRes, settingsRes, accountsRes, modelsRes, configRes] =
+      const [healthRes, settingsRes, accountsRes, runtimeRes, modelsRes, configRes] =
         await Promise.all([
           API.get('/api/chatcore/admin/health', { skipErrorHandler: true }),
           API.get('/api/chatcore/admin/settings', { skipErrorHandler: true }),
           API.get('/api/chatcore/admin/accounts', { skipErrorHandler: true }),
+          API.get('/api/chatcore/admin/runtime_candidates', {
+            skipErrorHandler: true,
+          }),
           API.get('/api/chatcore/admin/models', { skipErrorHandler: true }),
           API.get('/api/chatcore/admin/config', { skipErrorHandler: true }),
         ]);
@@ -171,6 +232,16 @@ export default function SettingsChatCoreRuntime() {
       setAccounts(
         Array.isArray(accountsRes.data?.accounts) ? accountsRes.data.accounts : [],
       );
+      setRuntimeCandidates({
+        count: Number(runtimeRes.data?.count || 0),
+        rawCount: Number(runtimeRes.data?.rawCount || 0),
+        candidates: Array.isArray(runtimeRes.data?.candidates)
+          ? runtimeRes.data.candidates
+          : [],
+        excluded: Array.isArray(runtimeRes.data?.excluded)
+          ? runtimeRes.data.excluded
+          : [],
+      });
       setModels(Array.isArray(modelsRes.data?.ids) ? modelsRes.data.ids : []);
       setConfigText(configRes.data?.activeConfig || configRes.data?.localConfig || '');
     } catch (error) {
@@ -243,6 +314,42 @@ export default function SettingsChatCoreRuntime() {
       showError(getErrorMessage(error, 'auth.json 上传失败'));
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleSweepInvalidAuths = async () => {
+    setSweeping(true);
+    try {
+      const res = await API.post(
+        '/api/chatcore/admin/sweep_invalid_auths',
+        {},
+        { skipErrorHandler: true },
+      );
+      showSuccess(`已扫描 ${res.data?.scanned || 0} 个账号，移除 ${res.data?.removed || 0} 个无效账号`);
+      await fetchRuntimeState();
+    } catch (error) {
+      showError(getErrorMessage(error, '无效账号清理失败'));
+    } finally {
+      setSweeping(false);
+    }
+  };
+
+  const handleProbeAuths = async () => {
+    setProbing(true);
+    try {
+      const res = await API.post(
+        '/api/chatcore/admin/probe_auths',
+        {},
+        { skipErrorHandler: true },
+      );
+      showSuccess(
+        `已探活 ${res.data?.scanned || 0} 个账号，隔离 ${res.data?.quarantined || 0} 个无效账号`,
+      );
+      await fetchRuntimeState();
+    } catch (error) {
+      showError(getErrorMessage(error, '账号主动探活失败'));
+    } finally {
+      setProbing(false);
     }
   };
 
@@ -495,6 +602,20 @@ export default function SettingsChatCoreRuntime() {
                   <Button type='primary' onClick={handleUploadAuths} loading={uploading}>
                     上传 auth.json
                   </Button>
+                  <Button
+                    style={{ marginLeft: 8 }}
+                    onClick={handleProbeAuths}
+                    loading={probing}
+                  >
+                    主动探活并隔离无效账号
+                  </Button>
+                  <Button
+                    style={{ marginLeft: 8 }}
+                    onClick={handleSweepInvalidAuths}
+                    loading={sweeping}
+                  >
+                    清理已判定无效账号
+                  </Button>
                 </div>
               </div>
             </Col>
@@ -509,6 +630,36 @@ export default function SettingsChatCoreRuntime() {
               columns={accountColumns}
               pagination={false}
               empty='暂无账号'
+            />
+          </div>
+
+          <div style={{ ...cardStyle, marginTop: 16 }}>
+            <Text strong>当前运行候选账号</Text>
+            <Text type='tertiary' size='small'>
+              当前真正会被强成功链路尝试的账号：{runtimeCandidates.count || 0} / {runtimeCandidates.rawCount || 0}
+            </Text>
+            <Table
+              style={{ marginTop: 12 }}
+              rowKey={(record, index) => `${record.label || 'runtime'}-${index}`}
+              dataSource={runtimeCandidates.candidates}
+              columns={runtimeCandidateColumns}
+              pagination={false}
+              empty='暂无运行候选账号'
+            />
+          </div>
+
+          <div style={{ ...cardStyle, marginTop: 16 }}>
+            <Text strong>被排除账号</Text>
+            <Text type='tertiary' size='small'>
+              这些账号当前不在 runtime 候选池里。
+            </Text>
+            <Table
+              style={{ marginTop: 12 }}
+              rowKey={(record, index) => `${record.label || 'excluded'}-${index}`}
+              dataSource={runtimeCandidates.excluded}
+              columns={excludedCandidateColumns}
+              pagination={false}
+              empty='暂无被排除账号'
             />
           </div>
 

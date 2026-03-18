@@ -12,8 +12,11 @@ from flask import Blueprint, current_app, jsonify, make_response, request, send_
 
 from .utils import (
     get_chatgpt_auth_records,
+    get_chatgpt_runtime_candidate_records,
     get_max_retry_interval_seconds,
+    probe_chatgpt_auth_candidates_and_quarantine_invalid,
     get_request_retry_limit,
+    sweep_invalid_chatgpt_auth_candidates,
     write_auth_file,
 )
 
@@ -556,6 +559,11 @@ def dashboard_accounts():
     return jsonify({"count": len(active_records), "rawCount": len(records), "accounts": active_records})
 
 
+@dashboard_bp.get("/api/runtime_candidates")
+def dashboard_runtime_candidates():
+    return jsonify(get_chatgpt_runtime_candidate_records())
+
+
 @dashboard_bp.get("/api/models")
 def dashboard_models():
     ids = _model_ids(bool(current_app.config.get("EXPOSE_REASONING_MODELS")))
@@ -762,3 +770,13 @@ def dashboard_action_upload_auths():
             "service": _service_status(),
         }
     )
+
+
+@dashboard_bp.post("/api/actions/sweep_invalid_auths")
+def dashboard_action_sweep_invalid_auths():
+    return jsonify(sweep_invalid_chatgpt_auth_candidates())
+
+
+@dashboard_bp.post("/api/actions/probe_auths")
+def dashboard_action_probe_auths():
+    return jsonify(probe_chatgpt_auth_candidates_and_quarantine_invalid())

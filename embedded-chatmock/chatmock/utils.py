@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from .config import CLIENT_ID_DEFAULT, OAUTH_TOKEN_URL
+from .config import CHATGPT_RESPONSES_URL, CLIENT_ID_DEFAULT, OAUTH_TOKEN_URL
 from .upstream_errors import (
     build_error_info,
     classify_error,
@@ -782,6 +782,49 @@ def _persist_dashboard_auth_files(paths: List[str]) -> bool:
     return _write_json_file(path, payload)
 
 
+def _quarantined_auth_files(stored: Dict[str, Any] | None = None) -> List[str]:
+    stored = stored if isinstance(stored, dict) else (_load_dashboard_settings() or {})
+    raw = stored.get("quarantinedAuthFiles")
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return []
+
+
+def _persist_dashboard_quarantined_auth_files(paths: List[str]) -> bool:
+    path = _dashboard_settings_path()
+    if not path:
+        return False
+    payload = _load_dashboard_settings() or {}
+    payload["quarantinedAuthFiles"] = list(paths)
+    payload["updatedAt"] = _now_iso8601()
+    return _write_json_file(path, payload)
+
+
+def _canonical_auth_path(path: str) -> str:
+    expanded = os.path.expanduser(str(path or "").strip())
+    return os.path.normcase(os.path.normpath(expanded)) if expanded else ""
+
+
+def _is_quarantined_auth_path(path: str) -> bool:
+    normalized = _canonical_auth_path(path)
+    if not normalized:
+        return False
+    quarantined = {_canonical_auth_path(item) for item in _quarantined_auth_files()}
+    return normalized in quarantined
+
+
+def _known_auth_file_paths(include_quarantined: bool = False) -> List[str]:
+    paths = _parse_auth_files_env(include_quarantined=include_quarantined)
+    if include_quarantined:
+        for item in _quarantined_auth_files():
+            normalized = str(item).strip()
+            if normalized and normalized not in paths:
+                paths.append(normalized)
+    return paths
+
+
 def _has_explicit_auth_files_config() -> bool:
     raw_flag = (os.getenv("CHATGPT_LOCAL_AUTH_FILES_CONFIGURED") or "").strip().lower()
     if raw_flag in ("1", "true", "yes", "on"):
@@ -945,6 +988,64 @@ def remove_chatgpt_auth_candidate(candidate: Dict[str, Any], *, reason: str = ""
         else:
             eprint(f"INFO: removed ChatGPT auth candidate {label}")
     return success
+
+
+def quarantine_chatgpt_auth_candidate(candidate: Dict[str, Any], *, reason: str = "") -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    label = str(candidate.get("label") or "").strip()
+    source_kind = str(candidate.get("source_kind") or "").strip()
+    source_path = str(candidate.get("source_path") or "").strip()
+    account_id = str(candidate.get("account_id") or "").strip()
+
+    if source_kind == "auth_pool":
+        return remove_chatgpt_auth_candidate(candidate, reason=reason or "Quarantined auth_pool candidate")
+
+    paths_to_quarantine: List[str] = []
+    if source_path:
+        paths_to_quarantine.append(source_path)
+
+    current_paths = _known_auth_file_paths(include_quarantined=True)
+    if account_id:
+        for path in current_paths:
+            if path in paths_to_quarantine:
+                continue
+            auth_obj = _read_json_file(path)
+            if not isinstance(auth_obj, dict):
+                continue
+            if _account_id_from_auth_obj(auth_obj) == account_id:
+                paths_to_quarantine.append(path)
+
+    if not paths_to_quarantine:
+        return False
+
+    active_paths = _parse_auth_files_env(include_quarantined=False)
+    updated_active = [item for item in active_paths if item not in paths_to_quarantine]
+    if updated_active:
+        os.environ["CHATGPT_LOCAL_AUTH_FILES"] = ",".join(updated_active)
+    else:
+        os.environ.pop("CHATGPT_LOCAL_AUTH_FILES", None)
+    _persist_dashboard_auth_files(updated_active)
+
+    existing_quarantined = _quarantined_auth_files()
+    normalized_existing = {_canonical_auth_path(item): item for item in existing_quarantined}
+    for path in paths_to_quarantine:
+        canonical = _canonical_auth_path(path)
+        if canonical and canonical not in normalized_existing:
+            existing_quarantined.append(path)
+            normalized_existing[canonical] = path
+
+    _persist_dashboard_quarantined_auth_files(existing_quarantined)
+    for path in paths_to_quarantine:
+        _remove_label_state(_label_for_auth_file_path(path))
+
+    if label:
+        _remove_label_state(label)
+        if reason:
+            eprint(f"INFO: quarantined ChatGPT auth candidate {label}: {reason}")
+        else:
+            eprint(f"INFO: quarantined ChatGPT auth candidate {label}")
+    return True
 
 
 def get_effective_chatgpt_auth() -> tuple[str | None, str | None]:
@@ -1560,10 +1661,10 @@ def _auth_record_from_obj(
     }
 
 
-def get_chatgpt_auth_records() -> List[Dict[str, Any]]:
+def get_chatgpt_auth_records(*, include_quarantined: bool = False) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
 
-    auth_files = _parse_auth_files_env()
+    auth_files = _known_auth_file_paths(include_quarantined=include_quarantined)
     explicit_auth_files = _has_explicit_auth_files_config()
     if auth_files:
         for idx, path in enumerate(auth_files):
@@ -1611,7 +1712,312 @@ def get_chatgpt_auth_records() -> List[Dict[str, Any]]:
     return records
 
 
-def _parse_auth_files_env() -> List[str]:
+def _runtime_candidate_record(candidate: Dict[str, Any], records_by_label: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    label = str(candidate.get("label") or "").strip()
+    source_path = str(candidate.get("source_path") or "").strip()
+    account_id = str(candidate.get("account_id") or "").strip()
+    record = dict(records_by_label.get(label) or {})
+    result = {
+        "label": label,
+        "source": record.get("source") or source_path,
+        "source_kind": str(candidate.get("source_kind") or "").strip(),
+        "source_index": candidate.get("source_index"),
+        "account_id": _compact_account_id(account_id),
+        "workspace_display": record.get("workspace_display") or "",
+        "email": record.get("email") or "",
+        "plan": record.get("plan") or "",
+        "has_access_token": bool(record.get("has_access_token")),
+        "has_refresh_token": bool(record.get("has_refresh_token")),
+        "has_id_token": bool(record.get("has_id_token")),
+        "sticky_bound": False,
+        **_state_for_label(label),
+    }
+    with _AUTH_SESSION_STICKY_LOCK:
+        _prune_chatgpt_auth_session_bindings()
+        sticky_count = 0
+        for binding in _AUTH_SESSION_STICKY.values():
+            if not isinstance(binding, dict):
+                continue
+            binding_label = str(binding.get("label") or "").strip()
+            binding_account = str(binding.get("account_id") or "").strip()
+            if (binding_label and binding_label == label) or (account_id and binding_account == account_id):
+                sticky_count += 1
+        result["sticky_bound"] = sticky_count > 0
+        result["sticky_sessions"] = sticky_count
+    return result
+
+
+def _runtime_excluded_reason(record: Dict[str, Any]) -> str:
+    classification = str(record.get("last_classification") or "").strip().lower()
+    raw_code = str(record.get("last_raw_code") or "").strip().lower()
+    if classification == "account_invalid" or raw_code == "deactivated_workspace":
+        return "account_invalid"
+    if int(record.get("cooldown_remaining") or 0) > 0:
+        return "cooldown"
+    if not bool(record.get("has_access_token")):
+        return "missing_access_token"
+    return "not_selected"
+
+
+def get_chatgpt_runtime_candidate_records(ensure_fresh: bool = True) -> Dict[str, Any]:
+    records = get_chatgpt_auth_records(include_quarantined=True)
+    records_by_label = {
+        str(record.get("label") or "").strip(): record
+        for record in records
+        if isinstance(record, dict) and str(record.get("label") or "").strip()
+    }
+    candidates = get_effective_chatgpt_auth_candidates(ensure_fresh=ensure_fresh)
+    candidate_labels = {
+        str(candidate.get("label") or "").strip()
+        for candidate in candidates
+        if isinstance(candidate, dict) and str(candidate.get("label") or "").strip()
+    }
+    runtime_candidates = [
+        _runtime_candidate_record(candidate, records_by_label)
+        for candidate in candidates
+        if isinstance(candidate, dict)
+    ]
+    excluded_records = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        label = str(record.get("label") or "").strip()
+        if label and label in candidate_labels:
+            continue
+        excluded = dict(record)
+        excluded["excluded_reason"] = _runtime_excluded_reason(record)
+        excluded_records.append(excluded)
+    return {
+        "count": len(runtime_candidates),
+        "rawCount": len(records),
+        "stickyEnabled": _session_sticky_enabled(),
+        "stickyTtlSeconds": _session_sticky_ttl_seconds(),
+        "candidates": runtime_candidates,
+        "excluded": excluded_records,
+    }
+
+
+def sweep_invalid_chatgpt_auth_candidates() -> Dict[str, Any]:
+    records = get_chatgpt_auth_records()
+    scanned = 0
+    removed = 0
+    details: List[Dict[str, Any]] = []
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        scanned += 1
+        reason = _runtime_excluded_reason(record)
+        if reason != "account_invalid":
+            continue
+
+        label = str(record.get("label") or "").strip()
+        source = str(record.get("source") or "").strip()
+        candidate: Dict[str, Any] = {
+            "label": label,
+            "account_id": "",
+            "source_kind": "auth_file",
+            "source_path": source,
+            "source_index": None,
+        }
+        if "#" in source and not source.lower().endswith("auth.json"):
+            pool_path, _, index_text = source.partition("#")
+            candidate["source_kind"] = "auth_pool"
+            candidate["source_path"] = pool_path
+            try:
+                candidate["source_index"] = max(0, int(index_text) - 1)
+            except Exception:
+                candidate["source_index"] = None
+        elif source:
+            auth_obj = _read_json_file(source)
+            if isinstance(auth_obj, dict):
+                candidate["account_id"] = _account_id_from_auth_obj(auth_obj)
+
+        ok = remove_chatgpt_auth_candidate(
+            candidate,
+            reason=str(record.get("last_raw_message") or record.get("last_error") or "Invalid account").strip(),
+        )
+        if ok:
+            removed += 1
+        details.append(
+            {
+                "label": label,
+                "source": source,
+                "reason": reason,
+                "removed": bool(ok),
+            }
+        )
+
+    return {
+        "ok": True,
+        "scanned": scanned,
+        "removed": removed,
+        "details": details,
+        "auth_files": os.environ.get("CHATGPT_LOCAL_AUTH_FILES", ""),
+        "runtime": get_chatgpt_runtime_candidate_records(),
+    }
+
+
+def _probe_chatgpt_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    access_token = str(candidate.get("access_token") or "").strip()
+    account_id = str(candidate.get("account_id") or "").strip()
+    if not access_token or not account_id:
+        return build_error_info(
+            source="probe",
+            phase="probe",
+            raw_status=401,
+            raw_message="Missing ChatGPT credentials",
+            raw_body={"message": "Missing ChatGPT credentials"},
+            category_override="account_invalid",
+        )
+
+    probe_payload = {
+        "model": "gpt-5.4-mini",
+        "instructions": "You are a helpful assistant.",
+        "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Reply with exactly: OK"}]}],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": False,
+        "store": False,
+        "stream": True,
+        "max_output_tokens": 1,
+        "prompt_cache_key": f"probe-{secrets.token_hex(8)}",
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "chatgpt-account-id": account_id,
+        "OpenAI-Beta": "responses=experimental",
+        "session_id": f"probe-{secrets.token_hex(8)}",
+    }
+
+    try:
+        response = requests.post(
+            CHATGPT_RESPONSES_URL,
+            headers=headers,
+            json=probe_payload,
+            stream=True,
+            timeout=90,
+        )
+    except requests.RequestException as exc:
+        return build_error_info(
+            source="probe",
+            phase="probe",
+            raw_status=502,
+            raw_message=str(exc),
+            raw_body={"exception": str(exc)},
+        )
+
+    try:
+        if int(response.status_code or 0) < 400:
+            return build_error_info(
+                source="probe",
+                phase="probe",
+                raw_status=int(response.status_code or 200),
+                raw_message="ok",
+                raw_body={"message": "ok"},
+                category_override="ready",
+            )
+        return error_info_from_http_response("probe", "probe", response)
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+
+
+def probe_chatgpt_auth_candidates_and_quarantine_invalid() -> Dict[str, Any]:
+    records = get_chatgpt_auth_records(include_quarantined=True)
+    scanned = 0
+    quarantined = 0
+    details: List[Dict[str, Any]] = []
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        scanned += 1
+        label = str(record.get("label") or "").strip()
+        source = str(record.get("source") or "").strip()
+        auth_obj = _read_json_file(source) if source else None
+        candidate = None
+        changed = False
+        if isinstance(auth_obj, dict):
+            candidate, changed = _candidate_from_auth_obj(
+                auth_obj,
+                label=label,
+                ensure_fresh=True,
+                source_kind="auth_file",
+                source_path=source,
+            )
+            if changed and source:
+                _write_json_file(source, auth_obj)
+
+        if candidate is None:
+            info = build_error_info(
+                source="probe",
+                phase="probe",
+                raw_status=401,
+                raw_message="Missing ChatGPT credentials",
+                raw_body={"message": "Missing ChatGPT credentials"},
+                category_override="account_invalid",
+            )
+        else:
+            info = _probe_chatgpt_candidate(candidate)
+
+        classification = classify_error(info)
+        status = int(info.get("raw_status") or 0) if isinstance(info.get("raw_status"), int) else None
+        if isinstance(status, int) and 200 <= status < 400:
+            classification = "ready"
+        message = str(info.get("raw_message") or "").strip()
+        raw_code = str(info.get("raw_code") or "").strip()
+
+        detail = {
+            "label": label,
+            "source": source,
+            "status": status,
+            "classification": classification,
+            "raw_code": raw_code,
+            "message": message,
+            "quarantined": False,
+        }
+
+        if classification == "account_invalid":
+            quarantine_candidate = candidate or {
+                "label": label,
+                "account_id": "",
+                "source_kind": "auth_file",
+                "source_path": source,
+                "source_index": None,
+            }
+            if quarantine_chatgpt_auth_candidate(quarantine_candidate, reason=message or raw_code or "Invalid account"):
+                quarantined += 1
+                detail["quarantined"] = True
+        elif candidate is not None:
+            if classification in ("insufficient_balance", "rate_limited"):
+                handle_chatgpt_candidate_failure(candidate, info)
+            else:
+                mark_chatgpt_auth_result(
+                    label,
+                    success=True,
+                    status_code=status if isinstance(status, int) and status > 0 else 200,
+                    account_id=str(candidate.get("account_id") or "").strip(),
+                    raw_code=raw_code or None,
+                    raw_message=message or None,
+                )
+
+        details.append(detail)
+
+    return {
+        "ok": True,
+        "scanned": scanned,
+        "quarantined": quarantined,
+        "details": details,
+        "runtime": get_chatgpt_runtime_candidate_records(),
+    }
+
+
+def _parse_auth_files_env(*, include_quarantined: bool = False) -> List[str]:
     raw = (os.getenv("CHATGPT_LOCAL_AUTH_FILES") or "").strip()
     paths: List[str] = []
     if raw:
@@ -1642,6 +2048,12 @@ def _parse_auth_files_env() -> List[str]:
         for discovered in sorted(glob.glob(os.path.join(os.path.expanduser(root), "acc*/auth.json"))):
             if discovered not in paths:
                 paths.append(discovered)
+    if include_quarantined:
+        return paths
+    quarantined = {_canonical_auth_path(item) for item in _quarantined_auth_files()}
+    if not quarantined:
+        return paths
+    return [path for path in paths if _canonical_auth_path(path) not in quarantined]
     return paths
 
 
