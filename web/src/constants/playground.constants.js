@@ -76,6 +76,7 @@ export const DEFAULT_CONFIG = {
     group: '',
     promptMode: 'default',
     systemPrompt: '',
+    forceReasoningOutput: false,
     temperature: 0.7,
     top_p: 1,
     frequency_penalty: 0,
@@ -97,6 +98,7 @@ export const DEFAULT_CONFIG = {
 export const PLAYGROUND_USER_INPUT_KEYS = [
   'promptMode',
   'systemPrompt',
+  'forceReasoningOutput',
   'temperature',
   'top_p',
   'frequency_penalty',

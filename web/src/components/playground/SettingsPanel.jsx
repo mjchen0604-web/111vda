@@ -246,6 +246,26 @@ const SettingsPanel = ({
           />
         </div>
 
+        <div className='space-y-3 rounded-xl border border-[var(--semi-color-border)] p-3'>
+          <div className='flex items-center justify-between gap-3'>
+            <div>
+              <Typography.Text strong className='text-sm'>
+                强制显示思考过程
+              </Typography.Text>
+              <Typography.Text className='text-xs text-gray-500 block mt-1'>
+                默认关闭。开启后，会向操练场请求自动注入可见 <think> 指令，尽量让模型把当前思考过程直接写出来。
+              </Typography.Text>
+            </div>
+            <Switch
+              checked={Boolean(inputs.forceReasoningOutput)}
+              onChange={(checked) => onInputChange('forceReasoningOutput', checked)}
+              checkedText='开'
+              uncheckedText='关'
+              size='small'
+            />
+          </div>
+        </div>
+
         <ImageUrlInput
           imageUrls={inputs.imageUrls}
           imageEnabled={inputs.imageEnabled}

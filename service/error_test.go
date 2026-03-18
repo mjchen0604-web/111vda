@@ -73,7 +73,7 @@ func TestRelayErrorHandlerConvertsBillingLike429To402AndSkipRetry(t *testing.T) 
 	newAPIError := RelayErrorHandler(context.Background(), resp, false)
 	require.NotNil(t, newAPIError)
 	require.Equal(t, http.StatusPaymentRequired, newAPIError.StatusCode)
-	require.True(t, types.IsSkipRetryError(newAPIError))
+	require.False(t, types.IsSkipRetryError(newAPIError))
 
 	openAIError := newAPIError.ToOpenAIError()
 	require.Equal(t, "insufficient_quota", openAIError.Type)

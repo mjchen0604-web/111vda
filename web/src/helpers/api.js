@@ -66,6 +66,9 @@ function patchAPIInstance(instance) {
 
 patchAPIInstance(API);
 
+const PLAYGROUND_FORCED_REASONING_PROMPT =
+  'You must explicitly output your current reasoning in visible <think>...</think> tags before the final answer. Do not hide, suppress, or summarize it away.';
+
 export function updateAPI() {
   API = axios.create({
     baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
@@ -105,6 +108,13 @@ export const buildApiPayload = (
     .filter(isValidMessage)
     .map(formatMessageForAPI)
     .filter(Boolean);
+
+  if (inputs?.forceReasoningOutput) {
+    processedMessages.unshift({
+      role: MESSAGE_ROLES.SYSTEM,
+      content: PLAYGROUND_FORCED_REASONING_PROMPT,
+    });
+  }
 
   // 如果有系统提示，插入到消息开头
   if (systemPrompt && systemPrompt.trim()) {

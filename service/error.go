@@ -129,7 +129,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
 			if nonRetryable := normalizeRetryableBilling429(resp.StatusCode, *oaiError); nonRetryable != nil {
-				newApiErr = types.WithOpenAIError(*nonRetryable, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
+				newApiErr = types.WithOpenAIError(*nonRetryable, http.StatusPaymentRequired)
 			} else {
 				newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
 			}
@@ -140,7 +140,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		}
 	}
 	if nonRetryable := normalizeRetryableBillingMessage(resp.StatusCode, errResponse.ToMessage()); nonRetryable != nil {
-		newApiErr = types.WithOpenAIError(*nonRetryable, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
+		newApiErr = types.WithOpenAIError(*nonRetryable, http.StatusPaymentRequired)
 		if showBodyWhenFail {
 			newApiErr.Err = buildErrWithBody(newApiErr.Error())
 		}

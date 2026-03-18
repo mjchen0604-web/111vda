@@ -11,18 +11,19 @@ import (
 )
 
 var playgroundAllowedInputKeys = map[string]struct{}{
-	"model":             {},
-	"group":             {},
-	"promptMode":        {},
-	"systemPrompt":      {},
-	"temperature":       {},
-	"top_p":             {},
-	"frequency_penalty": {},
-	"presence_penalty":  {},
-	"seed":              {},
-	"stream":            {},
-	"imageEnabled":      {},
-	"imageUrls":         {},
+	"model":                {},
+	"group":                {},
+	"promptMode":           {},
+	"systemPrompt":         {},
+	"forceReasoningOutput": {},
+	"temperature":          {},
+	"top_p":                {},
+	"frequency_penalty":    {},
+	"presence_penalty":     {},
+	"seed":                 {},
+	"stream":               {},
+	"imageEnabled":         {},
+	"imageUrls":            {},
 }
 
 var playgroundAllowedParameterKeys = map[string]struct{}{
@@ -34,13 +35,14 @@ var playgroundAllowedParameterKeys = map[string]struct{}{
 }
 
 var playgroundAllowedPersonalInputKeys = map[string]struct{}{
-	"promptMode":        {},
-	"systemPrompt":      {},
-	"temperature":       {},
-	"top_p":             {},
-	"frequency_penalty": {},
-	"presence_penalty":  {},
-	"seed":              {},
+	"promptMode":           {},
+	"systemPrompt":         {},
+	"forceReasoningOutput": {},
+	"temperature":          {},
+	"top_p":                {},
+	"frequency_penalty":    {},
+	"presence_penalty":     {},
+	"seed":                 {},
 }
 
 var playgroundAllowedVisibility = map[string]struct{}{
