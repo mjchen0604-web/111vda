@@ -545,6 +545,7 @@ export const useLogsData = () => {
               other?.audio_input_price || 0,
               other?.image_generation_call || false,
               other?.image_generation_call_price || 0,
+              logs[i].model_name || '',
               billingDisplayMode,
             );
           }

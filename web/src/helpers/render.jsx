@@ -1272,6 +1272,16 @@ function renderDisplayAmountFromUsd(usdAmount, digits = 6) {
   return renderQuotaWithAmount(Number(Number(usdAmount || 0).toFixed(digits)));
 }
 
+function getOpenAIInputBaseMultiplier(modelName = '', longContextMultiplier = 1) {
+  const normalizedModelName = String(modelName || '').toLowerCase();
+  const baseMultiplier = normalizedModelName.startsWith('gpt-5.4-mini')
+    ? 2
+    : normalizedModelName.startsWith('gpt-5.4')
+      ? 1
+      : 2;
+  return baseMultiplier * Number(longContextMultiplier || 1);
+}
+
 // Shared core for simple price rendering (used by OpenAI-like and Claude-like variants)
 function renderPriceSimpleCore({
   modelRatio,
@@ -1300,13 +1310,10 @@ function renderPriceSimpleCore({
   const finalGroupRatio = effectiveGroupRatio;
 
   const { symbol, rate } = getCurrencyConfig();
-  const normalizedModelName = String(modelName || '').toLowerCase();
-  const baseMultiplier = normalizedModelName.startsWith('gpt-5.4-mini')
-    ? 2
-    : normalizedModelName.startsWith('gpt-5.4')
-      ? 1
-      : 2;
-  const inputBaseMultiplier = baseMultiplier * Number(longContextMultiplier || 1);
+  const inputBaseMultiplier = getOpenAIInputBaseMultiplier(
+    modelName,
+    longContextMultiplier,
+  );
   if (modelPrice !== -1) {
     if (isPriceDisplayMode(displayMode, modelPrice)) {
       return joinBillingSummary([
@@ -1477,6 +1484,7 @@ export function renderModelPrice(
   audioInputPrice = 0,
   imageGenerationCall = false,
   imageGenerationCallPrice = 0,
+  modelName = '',
   displayMode = 'price',
 ) {
   const { ratio: effectiveGroupRatio, label: ratioLabel } = getEffectiveRatio(
@@ -1519,10 +1527,11 @@ export function renderModelPrice(
     if (completionRatio === undefined) {
       completionRatio = 0;
     }
-    const inputRatioPrice = modelRatio * 2.0;
-    const completionRatioPrice = modelRatio * 2.0 * completionRatio;
-    const cacheRatioPrice = modelRatio * 2.0 * cacheRatio;
-    const imageRatioPrice = modelRatio * 2.0 * imageRatio;
+    const inputBaseMultiplier = getOpenAIInputBaseMultiplier(modelName, 1);
+    const inputRatioPrice = modelRatio * inputBaseMultiplier;
+    const completionRatioPrice = modelRatio * inputBaseMultiplier * completionRatio;
+    const cacheRatioPrice = modelRatio * inputBaseMultiplier * cacheRatio;
+    const imageRatioPrice = modelRatio * inputBaseMultiplier * imageRatio;
     let effectiveInputTokens =
       inputTokens - cacheTokens + cacheTokens * cacheRatio;
     if (image && imageOutputTokens > 0) {
@@ -1734,8 +1743,9 @@ export function renderModelPrice(
   const completionRatioValue = formatRatioValue(completionRatio);
   const cacheRatioValue = formatRatioValue(cacheRatio);
   const imageRatioValue = formatRatioValue(imageRatio);
-  const inputRatioPrice = modelRatio * 2.0;
-  const completionRatioPrice = modelRatio * 2.0 * completionRatioValue;
+  const inputBaseMultiplier = getOpenAIInputBaseMultiplier(modelName, 1);
+  const inputRatioPrice = modelRatio * inputBaseMultiplier;
+  const completionRatioPrice = modelRatio * inputBaseMultiplier * completionRatioValue;
   const audioRatioValue =
     audioInputSeperatePrice && audioInputPrice > 0
       ? formatRatioValue(audioInputPrice / inputRatioPrice)

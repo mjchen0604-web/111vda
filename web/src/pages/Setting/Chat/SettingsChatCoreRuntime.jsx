@@ -70,9 +70,18 @@ const formatAccountStatus = (record) => {
   const cooldownRemaining = Number(record.cooldown_remaining || 0);
   const unlockAt = String(record.unlock_at || '').trim();
 
+  if (
+    cooldownRemaining <= 0 &&
+    !unlockAt &&
+    !lastError &&
+    (status === 'ready' || lastClassification === 'ready' || Number(lastStatus) === 200)
+  ) {
+    return 'ready';
+  }
+
   const parts = [];
 
-  if (Number.isFinite(lastStatus) && lastStatus > 0) {
+  if (Number.isFinite(lastStatus) && lastStatus > 0 && Number(lastStatus) !== 200) {
     parts.push(`HTTP ${lastStatus}`);
   } else if (status) {
     parts.push(status);
@@ -95,6 +104,40 @@ const formatAccountStatus = (record) => {
   }
 
   return parts.length > 0 ? parts.join(' | ') : '-';
+};
+
+const formatRuntimeCandidateStatus = (record) => {
+  if (!record || typeof record !== 'object') {
+    return '-';
+  }
+
+  const status = String(record.status || '').trim();
+  const classification = String(record.last_classification || '').trim();
+  const cooldownRemaining = Number(record.cooldown_remaining || 0);
+  const stickySessions = Number(record.sticky_sessions || 0);
+  const lastError = String(record.last_error || '').trim();
+  const lastStatus = Number(record.last_status || 0);
+
+  if (
+    cooldownRemaining <= 0 &&
+    !lastError &&
+    (status === 'ready' || classification === 'ready' || lastStatus === 200)
+  ) {
+    return stickySessions > 0 ? `ready | sticky ${stickySessions}` : 'ready';
+  }
+
+  return safeText(
+    [
+      status,
+      classification && classification !== status ? classification : '',
+      cooldownRemaining > 0 ? `cooldown ${cooldownRemaining}s` : '',
+      stickySessions > 0 ? `sticky ${stickySessions}` : '',
+      lastStatus > 0 && lastStatus !== 200 ? `HTTP ${lastStatus}` : '',
+      lastError,
+    ]
+      .filter(Boolean)
+      .join(' | '),
+  );
 };
 
 export default function SettingsChatCoreRuntime() {
@@ -156,19 +199,7 @@ export default function SettingsChatCoreRuntime() {
       {
         title: '状态',
         dataIndex: 'status',
-        render: (_, record) =>
-          safeText(
-            [
-              record.status,
-              record.last_classification,
-              Number(record.cooldown_remaining || 0) > 0
-                ? `cooldown ${record.cooldown_remaining}s`
-                : '',
-              Boolean(record.sticky_bound) ? `sticky ${record.sticky_sessions || 0}` : '',
-            ]
-              .filter(Boolean)
-              .join(' | '),
-          ),
+        render: (_, record) => formatRuntimeCandidateStatus(record),
       },
       { title: '来源文件', dataIndex: 'source', render: (_, record) => safeText(record.source) },
     ],
