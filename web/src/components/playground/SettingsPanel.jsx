@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (C) 2025 QuantumNous
 
 This program is free software: you can redistribute it and/or modify
@@ -27,9 +27,9 @@ import ImageUrlInput from './ImageUrlInput';
 import ParameterControl from './ParameterControl';
 
 const VISIBILITY_OPTIONS = [
-  { label: '鍏抽棴', value: 'off' },
-  { label: '浠呯鐞嗗憳', value: 'admin' },
-  { label: 'Global', value: 'global' },
+  { label: '关闭', value: 'off' },
+  { label: '仅管理员', value: 'admin' },
+  { label: '全局开放', value: 'global' },
 ];
 
 const SettingsPanel = ({
@@ -82,7 +82,7 @@ const SettingsPanel = ({
             <Settings size={20} className='text-white' />
           </div>
           <Typography.Title heading={5} className='mb-0'>
-            妯″瀷閰嶇疆
+            模型配置
           </Typography.Title>
         </div>
 
@@ -115,11 +115,11 @@ const SettingsPanel = ({
           <div className='flex items-center gap-2 mb-2'>
             <Users size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              鍒嗙粍
+              分组
             </Typography.Text>
           </div>
           <Select
-            placeholder='璇烽€夋嫨鍒嗙粍'
+            placeholder='请选择分组'
             name='group'
             required
             selection
@@ -139,9 +139,11 @@ const SettingsPanel = ({
         <div className='space-y-3 rounded-xl border border-[var(--semi-color-border)] p-3'>
           <div>
             <Typography.Text strong className='text-sm'>
-              鎻愮ず璇嶆ā寮?            </Typography.Text>
+              提示词模式
+            </Typography.Text>
             <Typography.Text className='text-xs text-gray-500 block mt-1'>
-              榛樿妯″紡浣跨敤鍐呯疆鑱婂ぉ鍩虹嚎鎻愮ず璇嶏紱鍘熺敓鏍煎紡鍙娇鐢ㄧ┖鎻愮ず璇嶆垨浣犳墜鍔ㄥ～鍐欑殑鎻愮ず璇嶃€?            </Typography.Text>
+              默认模式使用内置聊天基线提示词；原生格式只使用空提示词或你手动填写的提示词。
+            </Typography.Text>
           </div>
 
           <div className='grid grid-cols-2 gap-2'>
@@ -151,7 +153,7 @@ const SettingsPanel = ({
               onClick={() => onPromptModeChange('default')}
               className='!rounded-lg'
             >
-              榛樿
+              默认
             </Button>
             <Button
               theme={inputs.promptMode === 'native' ? 'solid' : 'light'}
@@ -159,23 +161,24 @@ const SettingsPanel = ({
               onClick={() => onPromptModeChange('native')}
               className='!rounded-lg'
             >
-              鍘熺敓鏍煎紡
+              原生格式
             </Button>
           </div>
 
           <div className='flex items-center justify-between gap-3'>
             <div>
               <Typography.Text strong className='text-sm'>
-                鏄惁鐪熷疄搴旂敤
+                是否真实应用
               </Typography.Text>
               <Typography.Text className='text-xs text-gray-500 block mt-1'>
-                寮€鍚悗锛屽綋鍓嶆彁绀鸿瘝妯″紡鍜岃嚜瀹氫箟鎻愮ず璇嶄細甯﹀埌鐪熷疄璇锋眰锛涘叧闂悗鍙湪鎿嶇粌鍦烘湰鍦扮敓鏁堛€?              </Typography.Text>
+                开启后，当前提示词模式和自定义提示词会带到真实请求；关闭后只在操练场本地生效。
+              </Typography.Text>
             </div>
             <Switch
               checked={applyPromptToRealAPI}
               onChange={onApplyPromptToRealAPIChange}
-              checkedText='On'
-              uncheckedText='Off'
+              checkedText='开'
+              uncheckedText='关'
               size='small'
             />
           </div>
@@ -185,16 +188,18 @@ const SettingsPanel = ({
             onChange={(value) => onInputChange('systemPrompt', value)}
             disabled={promptInputLocked}
             autosize={{ minRows: 4, maxRows: 10 }}
-            placeholder='Native mode lets you enter a custom system prompt. Leave blank for an empty prompt. When real apply is enabled this field becomes read-only.'
+            placeholder='原生格式下可填写自定义提示词；留空则使用空提示词。开启真实应用后这里会锁定，关闭后才能继续编辑。'
             className='!rounded-lg'
           />
 
           {adminControls?.enabled && (
             <div className='rounded-lg bg-[var(--semi-color-fill-0)] p-3'>
               <Typography.Text strong className='text-sm block mb-2'>
-                绠＄悊鍛樺叏灞€鎻愮ず璇嶅揩鎹峰垏鎹?              </Typography.Text>
+                管理员全局提示词快捷切换
+              </Typography.Text>
               <Typography.Text className='text-xs text-gray-500 block mb-3'>
-                鐐瑰嚮鍝竟锛屽氨鎶婂叏灞€榛樿鎻愮ず璇嶅垏鍒板摢杈癸紝骞跺悓姝ヤ笂鏂瑰綋鍓嶉€変腑鐨勭姸鎬併€?              </Typography.Text>
+                点击哪边，就把全局默认提示词切到哪边，并同步上方当前选中的状态。
+              </Typography.Text>
               <div className='grid grid-cols-2 gap-2'>
                 <Button
                   theme='outline'
@@ -202,14 +207,15 @@ const SettingsPanel = ({
                   onClick={() => adminControls.onSaveGlobalPromptPreset?.('default')}
                   className='!rounded-lg'
                 >
-                  鍏ㄥ眬榛樿鎻愮ず璇?                </Button>
+                  全局默认提示词
+                </Button>
                 <Button
                   theme='outline'
                   type='warning'
                   onClick={() => adminControls.onSaveGlobalPromptPreset?.('native-empty')}
                   className='!rounded-lg'
                 >
-                  鍏ㄥ眬绌烘彁绀鸿瘝
+                  全局空提示词
                 </Button>
               </div>
             </div>
@@ -220,11 +226,11 @@ const SettingsPanel = ({
           <div className='flex items-center gap-2 mb-2'>
             <Sparkles size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              妯″瀷
+              模型
             </Typography.Text>
           </div>
           <Select
-            placeholder='璇烽€夋嫨妯″瀷'
+            placeholder='请选择模型'
             name='model'
             required
             selection
@@ -244,15 +250,17 @@ const SettingsPanel = ({
           <div className='flex items-center justify-between gap-3'>
             <div>
               <Typography.Text strong className='text-sm'>
-                寮哄埗鏄剧ず鎬濊€冭繃绋?              </Typography.Text>
+                强制显示思考过程
+              </Typography.Text>
               <Typography.Text className='text-xs text-gray-500 block mt-1'>
-                榛樿鍏抽棴銆傚紑鍚悗锛屼細鍚戞搷缁冨満璇锋眰鑷姩娉ㄥ叆鍙 {'<think>'} 鎸囦护锛屽敖閲忚妯″瀷鎶婂綋鍓嶆€濊€冭繃绋嬬洿鎺ュ啓鍑烘潵銆?              </Typography.Text>
+                默认关闭。开启后，会向操练场请求自动注入可见 {'<think>'} 指令，尽量让模型把当前思考过程直接写出来。
+              </Typography.Text>
             </div>
             <Switch
               checked={Boolean(inputs.forceReasoningOutput)}
               onChange={(checked) => onInputChange('forceReasoningOutput', checked)}
-              checkedText='On'
-              uncheckedText='Off'
+              checkedText='开'
+              uncheckedText='关'
               size='small'
             />
           </div>
@@ -267,7 +275,7 @@ const SettingsPanel = ({
 
         <div className='space-y-3 rounded-xl border border-[var(--semi-color-border)] p-3'>
           <Typography.Text strong className='text-sm'>
-            妯″瀷閰嶇疆
+            模型配置
           </Typography.Text>
           <ParameterControl
             inputs={inputs}
@@ -278,16 +286,17 @@ const SettingsPanel = ({
           <div className='flex items-center justify-between gap-3 pt-1'>
             <div>
               <Typography.Text strong className='text-sm'>
-                妯″瀷閰嶇疆杩欎簲涓弬鏁板甫鍒扮湡瀹炶姹備綋
+                模型配置这五个参数带到真实请求体
               </Typography.Text>
               <Typography.Text className='text-xs text-gray-500 block mt-1'>
-                寮€鍚悗锛孴emperature銆乀op P銆丗requency Penalty銆丳resence Penalty銆丼eed 浼氭敞鍏ョ湡瀹炶姹傦紱鍏抽棴鍚庡彧鍦ㄦ搷缁冨満鏈湴鐢熸晥銆?              </Typography.Text>
+                开启后，Temperature、Top P、Frequency Penalty、Presence Penalty、Seed 会注入真实请求；关闭后只在操练场本地生效。
+              </Typography.Text>
             </div>
             <Switch
               checked={applyModelConfigToRealAPI}
               onChange={onApplyModelConfigToRealAPIChange}
-              checkedText='On'
-              uncheckedText='Off'
+              checkedText='开'
+              uncheckedText='关'
               size='small'
             />
           </div>
@@ -298,11 +307,12 @@ const SettingsPanel = ({
             <div className='flex items-center gap-2'>
               <Bug size={16} className='text-gray-500' />
               <Typography.Text strong className='text-sm'>
-                瀹為獙鍔熻兘鍙鎬?              </Typography.Text>
+                实验功能可见性
+              </Typography.Text>
             </div>
             <div>
               <Typography.Text className='text-xs text-gray-500 mb-2 block'>
-                璋冭瘯淇℃伅
+                调试信息
               </Typography.Text>
               <Select
                 value={adminControls.debugVisibility}
@@ -313,7 +323,7 @@ const SettingsPanel = ({
             </div>
             <div>
               <Typography.Text className='text-xs text-gray-500 mb-2 block'>
-                鑷畾涔夎姹備綋妯″紡
+                自定义请求体模式
               </Typography.Text>
               <Select
                 value={adminControls.customRequestVisibility}
@@ -342,14 +352,14 @@ const SettingsPanel = ({
             <div className='flex items-center gap-2'>
               <ToggleLeft size={16} className='text-gray-500' />
               <Typography.Text strong className='text-sm'>
-                娴佸紡杈撳嚭
+                流式输出
               </Typography.Text>
             </div>
             <Switch
               checked={inputs.stream}
               onChange={(checked) => onInputChange('stream', checked)}
-              checkedText='On'
-              uncheckedText='Off'
+              checkedText='开'
+              uncheckedText='关'
               size='small'
             />
           </div>
