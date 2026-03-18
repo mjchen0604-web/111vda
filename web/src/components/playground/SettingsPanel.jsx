@@ -29,7 +29,7 @@ import ParameterControl from './ParameterControl';
 const VISIBILITY_OPTIONS = [
   { label: '鍏抽棴', value: 'off' },
   { label: '浠呯鐞嗗憳', value: 'admin' },
-  { label: '鍏ㄥ眬寮€鏀?, value: 'global' },
+  { label: 'Global', value: 'global' },
 ];
 
 const SettingsPanel = ({
@@ -185,7 +185,7 @@ const SettingsPanel = ({
             onChange={(value) => onInputChange('systemPrompt', value)}
             disabled={promptInputLocked}
             autosize={{ minRows: 4, maxRows: 10 }}
-            placeholder='鍘熺敓鏍煎紡涓嬪彲濉啓鑷畾涔夋彁绀鸿瘝锛涚暀绌哄垯浣跨敤绌烘彁绀鸿瘝銆傚紑鍚湡瀹炲簲鐢ㄥ悗杩欓噷浼氶攣瀹氾紝鍏抽棴鍚庢墠鑳界户缁紪杈戙€?
+            placeholder='Native mode lets you enter a custom system prompt. Leave blank for an empty prompt. When real apply is enabled this field becomes read-only.'
             className='!rounded-lg'
           />
 
