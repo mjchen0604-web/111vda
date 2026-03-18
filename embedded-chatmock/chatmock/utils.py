@@ -31,9 +31,6 @@ _AUTH_POOL_STATE_LOCK = threading.RLock()
 _AUTH_POOL_STATE: Dict[str, Dict[str, Any]] = {}
 _INVALID_AUTH_LOCK = threading.RLock()
 _INVALID_AUTH_LABELS: set[str] = set()
-_INVALID_AUTH_ACCOUNT_IDS: set[str] = set()
-_AUTH_ACCOUNT_COOLDOWN_LOCK = threading.RLock()
-_AUTH_ACCOUNT_COOLDOWN_UNTIL: Dict[str, float] = {}
 _AUTH_INFLIGHT_LOCK = threading.RLock()
 _AUTH_INFLIGHT_COUNTS: Dict[str, int] = {}
 _AUTH_SESSION_STICKY_LOCK = threading.RLock()
@@ -273,14 +270,14 @@ def bind_chatgpt_auth_session(session_id: str | None, candidate: Dict[str, Any] 
     if not normalized or not isinstance(candidate, dict):
         return
     label = str(candidate.get("label") or "").strip()
-    account_id = str(candidate.get("account_id") or "").strip()
-    if not label and not account_id:
+    source_path = str(candidate.get("source_path") or "").strip()
+    if not label and not source_path:
         return
     with _AUTH_SESSION_STICKY_LOCK:
         _prune_chatgpt_auth_session_bindings()
         _AUTH_SESSION_STICKY[normalized] = {
             "label": label,
-            "account_id": account_id,
+            "source_path": source_path,
             "updated_at": time.time(),
         }
 
@@ -293,15 +290,15 @@ def _preferred_chatgpt_auth_candidate_for_session(
     if not isinstance(binding, dict):
         return None
     binding_label = str(binding.get("label") or "").strip()
-    binding_account_id = str(binding.get("account_id") or "").strip()
+    binding_source_path = str(binding.get("source_path") or "").strip()
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
         candidate_label = str(candidate.get("label") or "").strip()
-        candidate_account_id = str(candidate.get("account_id") or "").strip()
+        candidate_source_path = str(candidate.get("source_path") or "").strip()
         if binding_label and candidate_label == binding_label:
             return candidate
-        if binding_account_id and candidate_account_id == binding_account_id:
+        if binding_source_path and candidate_source_path == binding_source_path:
             return candidate
     clear_chatgpt_auth_session_binding(session_id)
     return None
@@ -852,45 +849,40 @@ def _mark_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> No
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip():
             _INVALID_AUTH_LABELS.add(label.strip())
-        if isinstance(account_id, str) and account_id.strip():
-            _INVALID_AUTH_ACCOUNT_IDS.add(account_id.strip())
 
 
 def _clear_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> None:
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip():
             _INVALID_AUTH_LABELS.discard(label.strip())
-        if isinstance(account_id, str) and account_id.strip():
-            _INVALID_AUTH_ACCOUNT_IDS.discard(account_id.strip())
 
 
 def _is_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> bool:
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip() and label.strip() in _INVALID_AUTH_LABELS:
             return True
-        if isinstance(account_id, str) and account_id.strip() and account_id.strip() in _INVALID_AUTH_ACCOUNT_IDS:
-            return True
     return False
 
 
 def _set_account_cooldown(*, account_id: str = "", until_ts: float = 0.0) -> None:
-    if not isinstance(account_id, str) or not account_id.strip():
+    label = str(account_id or "").strip()
+    if not label:
         return
-    with _AUTH_ACCOUNT_COOLDOWN_LOCK:
-        if until_ts > 0:
-            _AUTH_ACCOUNT_COOLDOWN_UNTIL[account_id.strip()] = float(until_ts)
-        else:
-            _AUTH_ACCOUNT_COOLDOWN_UNTIL.pop(account_id.strip(), None)
+    with _AUTH_POOL_STATE_LOCK:
+        state = dict(_AUTH_POOL_STATE.get(label) or {})
+        state["cooldown_until"] = float(until_ts) if until_ts > 0 else 0.0
+        _AUTH_POOL_STATE[label] = state
 
 
 def _get_account_cooldown(account_id: str) -> float:
-    if not isinstance(account_id, str) or not account_id.strip():
+    label = str(account_id or "").strip()
+    if not label:
         return 0.0
-    with _AUTH_ACCOUNT_COOLDOWN_LOCK:
-        until_ts = float(_AUTH_ACCOUNT_COOLDOWN_UNTIL.get(account_id.strip()) or 0.0)
+    with _AUTH_POOL_STATE_LOCK:
+        until_ts = float((_AUTH_POOL_STATE.get(label) or {}).get("cooldown_until") or 0.0)
     now = time.time()
     if until_ts <= now:
-        _set_account_cooldown(account_id=account_id, until_ts=0.0)
+        _set_account_cooldown(account_id=label, until_ts=0.0)
         return 0.0
     return until_ts
 
@@ -902,7 +894,7 @@ def is_auth_candidate_blocked(candidate: Dict[str, Any]) -> bool:
     account_id = str(candidate.get("account_id") or "").strip()
     if _is_invalid_auth_candidate(label=label, account_id=account_id):
         return True
-    cooldown_until = _get_account_cooldown(account_id)
+    cooldown_until = _get_account_cooldown(label)
     if cooldown_until > time.time():
         return True
     return False
@@ -949,23 +941,11 @@ def remove_chatgpt_auth_candidate(candidate: Dict[str, Any], *, reason: str = ""
     source_kind = str(candidate.get("source_kind") or "").strip()
     source_path = str(candidate.get("source_path") or "").strip()
     source_index = candidate.get("source_index")
-    account_id = str(candidate.get("account_id") or "").strip()
 
     success = False
     if source_kind in ("auth_file", "default_auth"):
         current_paths = _parse_auth_files_env()
-        paths_to_remove: List[str] = []
-        if source_path:
-            paths_to_remove.append(source_path)
-        if account_id:
-            for path in current_paths:
-                if path in paths_to_remove:
-                    continue
-                auth_obj = _read_json_file(path)
-                if not isinstance(auth_obj, dict):
-                    continue
-                if _account_id_from_auth_obj(auth_obj) == account_id:
-                    paths_to_remove.append(path)
+        paths_to_remove: List[str] = [source_path] if source_path else []
         if paths_to_remove:
             updated = [item for item in current_paths if item not in paths_to_remove]
             if updated:
@@ -996,25 +976,11 @@ def quarantine_chatgpt_auth_candidate(candidate: Dict[str, Any], *, reason: str 
     label = str(candidate.get("label") or "").strip()
     source_kind = str(candidate.get("source_kind") or "").strip()
     source_path = str(candidate.get("source_path") or "").strip()
-    account_id = str(candidate.get("account_id") or "").strip()
 
     if source_kind == "auth_pool":
         return remove_chatgpt_auth_candidate(candidate, reason=reason or "Quarantined auth_pool candidate")
 
-    paths_to_quarantine: List[str] = []
-    if source_path:
-        paths_to_quarantine.append(source_path)
-
-    current_paths = _known_auth_file_paths(include_quarantined=True)
-    if account_id:
-        for path in current_paths:
-            if path in paths_to_quarantine:
-                continue
-            auth_obj = _read_json_file(path)
-            if not isinstance(auth_obj, dict):
-                continue
-            if _account_id_from_auth_obj(auth_obj) == account_id:
-                paths_to_quarantine.append(path)
+    paths_to_quarantine: List[str] = [source_path] if source_path else []
 
     if not paths_to_quarantine:
         return False
@@ -1272,20 +1238,20 @@ def _ordered_candidates_by_strategy(candidates: List[Dict[str, str]]) -> List[Di
 
 
 def get_max_inflight_per_account() -> int:
-    raw = (os.getenv("CHATGPT_LOCAL_MAX_INFLIGHT_PER_ACCOUNT") or "3").strip()
+    raw = (os.getenv("CHATGPT_LOCAL_MAX_INFLIGHT_PER_ACCOUNT") or "2").strip()
     try:
         value = int(raw)
     except Exception:
-        value = 3
+        value = 2
     return max(1, min(32, value))
 
 
 def _candidate_busy_key(candidate: Dict[str, Any]) -> str:
     if not isinstance(candidate, dict):
         return ""
-    account_id = str(candidate.get("account_id") or "").strip()
-    if account_id:
-        return account_id
+    source_path = str(candidate.get("source_path") or "").strip()
+    if source_path:
+        return source_path
     return str(candidate.get("label") or "").strip()
 
 
@@ -1476,7 +1442,6 @@ def mark_chatgpt_auth_result(
         state = dict(_AUTH_POOL_STATE.get(label) or {})
         if success:
             _clear_invalid_auth_candidate(label=label)
-            _set_account_cooldown(account_id=account_id or "", until_ts=0.0)
             _set_auth_pool_state(
                 label,
                 status="ready",
@@ -1552,7 +1517,6 @@ def handle_chatgpt_candidate_failure(candidate: Dict[str, Any], info: Dict[str, 
 
     if effective_classification in ("insufficient_balance", "rate_limited"):
         cooldown_until = float(retry_at_until) if retry_at_until is not None else time.time() + float(5 * 60 * 60)
-        _set_account_cooldown(account_id=account_id, until_ts=cooldown_until)
         mark_chatgpt_auth_result(
             label,
             success=False,
@@ -1739,8 +1703,8 @@ def _runtime_candidate_record(candidate: Dict[str, Any], records_by_label: Dict[
             if not isinstance(binding, dict):
                 continue
             binding_label = str(binding.get("label") or "").strip()
-            binding_account = str(binding.get("account_id") or "").strip()
-            if (binding_label and binding_label == label) or (account_id and binding_account == account_id):
+            binding_source_path = str(binding.get("source_path") or "").strip()
+            if (binding_label and binding_label == label) or (binding_source_path and binding_source_path == source_path):
                 sticky_count += 1
         result["sticky_bound"] = sticky_count > 0
         result["sticky_sessions"] = sticky_count

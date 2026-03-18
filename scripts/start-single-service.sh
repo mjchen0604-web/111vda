@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 CHAT_HOST="${CHATCORE_INTERNAL_CHAT_HOST:-127.0.0.1}"
 CHAT_PORT="${CHATCORE_INTERNAL_CHAT_PORT:-1455}"
 AUTH_DIR="${CHATMOCK_AUTH_DIR:-/data/chatmock-accounts}"
-CHAT_ROOT="/app/embedded-chatmock"
+CHAT_ROOT="${CHATCORE_EMBEDDED_CHAT_ROOT:-$REPO_ROOT/embedded-chatmock}"
 SETTINGS_PATH="${CHATMOCK_DASHBOARD_SETTINGS_PATH:-/data/chatmock-dashboard-settings.json}"
 CHATGPT_LOCAL_HOME="${CHATGPT_LOCAL_HOME:-/data/.chatgpt-local}"
 CHATMOCK_CONFIG_SEED="${CHATMOCK_CODEX_CONFIG_SEED:-$CHAT_ROOT/config.toml}"
+NEW_API_BIN="${CHATCORE_NEW_API_BIN:-$REPO_ROOT/new-api}"
+
+if [[ ! -x "$NEW_API_BIN" && -x "/new-api" ]]; then
+  NEW_API_BIN="/new-api"
+fi
 
 mkdir -p "$AUTH_DIR" /data "$CHATGPT_LOCAL_HOME"
 export CHATMOCK_DASHBOARD_AUTH_DIR="${CHATMOCK_DASHBOARD_AUTH_DIR:-$AUTH_DIR}"
@@ -105,4 +113,4 @@ if ! wget -qO- "http://${CHAT_HOST}:${CHAT_PORT}/health" >/dev/null 2>&1; then
   exit 1
 fi
 
-exec /new-api
+exec "$NEW_API_BIN"

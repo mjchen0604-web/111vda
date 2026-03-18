@@ -325,7 +325,7 @@ export default function SettingsChatCoreRuntime() {
         {},
         { skipErrorHandler: true },
       );
-      showSuccess(`已扫描 ${res.data?.scanned || 0} 个账号，移除 ${res.data?.removed || 0} 个无效账号`);
+      showSuccess(`已扫描 ${res.data?.scanned || 0} 个凭证，移除 ${res.data?.removed || 0} 个无效凭证`);
       await fetchRuntimeState();
     } catch (error) {
       showError(getErrorMessage(error, '无效账号清理失败'));
@@ -343,7 +343,7 @@ export default function SettingsChatCoreRuntime() {
         { skipErrorHandler: true },
       );
       showSuccess(
-        `已探活 ${res.data?.scanned || 0} 个账号，隔离 ${res.data?.quarantined || 0} 个无效账号`,
+        `已探活 ${res.data?.scanned || 0} 个凭证，隔离 ${res.data?.quarantined || 0} 个无效凭证`,
       );
       await fetchRuntimeState();
     } catch (error) {

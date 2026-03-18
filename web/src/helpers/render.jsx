@@ -1301,9 +1301,12 @@ function renderPriceSimpleCore({
 
   const { symbol, rate } = getCurrencyConfig();
   const normalizedModelName = String(modelName || '').toLowerCase();
-  const inputBaseMultiplier =
-    (normalizedModelName.startsWith('gpt-5.4') ? 1 : 2) *
-    Number(longContextMultiplier || 1);
+  const baseMultiplier = normalizedModelName.startsWith('gpt-5.4-mini')
+    ? 2
+    : normalizedModelName.startsWith('gpt-5.4')
+      ? 1
+      : 2;
+  const inputBaseMultiplier = baseMultiplier * Number(longContextMultiplier || 1);
   if (modelPrice !== -1) {
     if (isPriceDisplayMode(displayMode, modelPrice)) {
       return joinBillingSummary([

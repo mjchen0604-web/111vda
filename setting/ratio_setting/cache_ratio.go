@@ -102,6 +102,10 @@ func addTieredCacheRatio(target map[string]float64, base string, ratio float64) 
 	target[base+"-xhigh"] = ratio
 }
 
+func addMinimalCacheAlias(target map[string]float64, base string, ratio float64) {
+	target[base+"-minimal"] = ratio
+}
+
 func init() {
 	addTieredCacheRatio(defaultCacheRatio, "gpt-5.4", 0.1)
 	addTieredCacheRatio(defaultCacheRatio, "gpt-5.4-fast", 0.1)
@@ -121,6 +125,7 @@ func init() {
 	} {
 		addTieredCacheRatio(defaultCacheRatio, base, 0.1)
 	}
+	addMinimalCacheAlias(defaultCacheRatio, "gpt-5", 0.1)
 }
 
 //var defaultCreateCacheRatio = map[string]float64{}

@@ -663,6 +663,7 @@ export const calculateModelPrice = ({
         xhigh: { input: 1.25, cache: 0.125, output: 15.0 },
       },
       'gpt-5': {
+        minimal: { input: 1.25, cache: 0.125, output: 10.0 },
         low: { input: 1.25, cache: 0.125, output: 7.5 },
         medium: { input: 1.25, cache: 0.125, output: 10.0 },
         high: { input: 1.25, cache: 0.125, output: 12.5 },
@@ -704,7 +705,7 @@ export const calculateModelPrice = ({
     if (!normalized.startsWith('gpt-5')) {
       return null;
     }
-    const suffixes = ['-low', '-medium', '-high', '-xhigh'];
+    const suffixes = ['-minimal', '-low', '-medium', '-high', '-xhigh'];
     let baseModel = normalized;
     let effort = 'medium';
     for (const suffix of suffixes) {
