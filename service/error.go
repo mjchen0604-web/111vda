@@ -17,6 +17,20 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
+var nonRetryableBilling429Keywords = []string{
+	"payment required",
+	"insufficient quota",
+	"insufficient_quota",
+	"insufficient balance",
+	"insufficient_balance",
+	"exceeded your current quota",
+	"quota exceeded",
+	"credit balance",
+	"out of credits",
+	"billing",
+	"credits",
+}
+
 func MidjourneyErrorWrapper(code int, desc string) *dto.MidjourneyResponse {
 	return &dto.MidjourneyResponse{
 		Code:        code,
@@ -114,18 +128,72 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
-			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
+			if nonRetryable := normalizeRetryableBilling429(resp.StatusCode, *oaiError); nonRetryable != nil {
+				newApiErr = types.WithOpenAIError(*nonRetryable, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
+			} else {
+				newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
+			}
 			if showBodyWhenFail {
 				newApiErr.Err = buildErrWithBody(newApiErr.Error())
 			}
 			return
 		}
 	}
+	if nonRetryable := normalizeRetryableBillingMessage(resp.StatusCode, errResponse.ToMessage()); nonRetryable != nil {
+		newApiErr = types.WithOpenAIError(*nonRetryable, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
+		if showBodyWhenFail {
+			newApiErr.Err = buildErrWithBody(newApiErr.Error())
+		}
+		return
+	}
 	newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	if showBodyWhenFail {
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}
 	return
+}
+
+func normalizeRetryableBilling429(statusCode int, openAIError types.OpenAIError) *types.OpenAIError {
+	if statusCode != http.StatusTooManyRequests {
+		return nil
+	}
+	message := strings.TrimSpace(openAIError.Message)
+	if !shouldTreat429AsBillingError(message) {
+		return nil
+	}
+	return &types.OpenAIError{
+		Message: message,
+		Type:    "insufficient_quota",
+		Param:   openAIError.Param,
+		Code:    "insufficient_quota",
+	}
+}
+
+func normalizeRetryableBillingMessage(statusCode int, message string) *types.OpenAIError {
+	if statusCode != http.StatusTooManyRequests {
+		return nil
+	}
+	if !shouldTreat429AsBillingError(message) {
+		return nil
+	}
+	return &types.OpenAIError{
+		Message: strings.TrimSpace(message),
+		Type:    "insufficient_quota",
+		Code:    "insufficient_quota",
+	}
+}
+
+func shouldTreat429AsBillingError(message string) bool {
+	lowerMessage := strings.ToLower(strings.TrimSpace(message))
+	if lowerMessage == "" {
+		return false
+	}
+	for _, keyword := range nonRetryableBilling429Keywords {
+		if strings.Contains(lowerMessage, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
