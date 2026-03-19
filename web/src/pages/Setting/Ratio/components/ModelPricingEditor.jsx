@@ -389,6 +389,40 @@ export default function ModelPricingEditor({
                   </div>
                 </div>
 
+                <Card
+                  bodyStyle={{ padding: 16 }}
+                  style={{
+                    marginBottom: 16,
+                    background: 'var(--semi-color-fill-0)',
+                  }}
+                >
+                  <div className='font-medium mb-3'>{t('实际消耗控制')}</div>
+                  <PriceInput
+                    label={t('实际消耗倍率')}
+                    value={selectedModel.consumeRatio}
+                    placeholder={t('输入 1.2 表示实际扣费提升 20%')}
+                    suffix='x'
+                    onChange={(value) => handleNumericFieldChange('consumeRatio', value)}
+                    headerAction={
+                      <Switch
+                        size='small'
+                        checked={isOptionalFieldEnabled(selectedModel, 'consumeRatio')}
+                        onChange={(checked) =>
+                          handleOptionalFieldToggle('consumeRatio', checked)
+                        }
+                      />
+                    }
+                    hidden={!isOptionalFieldEnabled(selectedModel, 'consumeRatio')}
+                    extraText={
+                      !isOptionalFieldEnabled(selectedModel, 'consumeRatio')
+                        ? t('当前未启用，需要时再打开即可。')
+                        : t(
+                            '只影响真实扣费/日志消耗，不影响模型广场对外显示的输入价、补全价。',
+                          )
+                    }
+                  />
+                </Card>
+
                 {selectedWarnings.length > 0 ? (
                   <Card
                     bodyStyle={{ padding: 12 }}

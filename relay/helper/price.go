@@ -57,6 +57,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 	var preConsumedQuota int
 	var modelRatio float64
+	var consumeRatio float64
 	var completionRatio float64
 	var cacheRatio float64
 	var imageRatio float64
@@ -80,6 +81,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 			return types.PriceData{}, fmt.Errorf("model %s ratio or price not set, please set or start self-use mode", matchName)
 		}
 
+		consumeRatio = ratio_setting.GetModelConsumeRatio(info.OriginModelName)
 		completionRatio = ratio_setting.GetCompletionRatio(info.OriginModelName)
 		cacheRatio, _ = ratio_setting.GetCacheRatio(info.OriginModelName)
 		cacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(info.OriginModelName)
@@ -89,12 +91,13 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		audioRatio = ratio_setting.GetAudioRatio(info.OriginModelName)
 		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(info.OriginModelName)
 		ratio := modelRatio * groupRatioInfo.GroupRatio
-		preConsumedQuota = int(float64(preConsumedTokens) * ratio)
+		preConsumedQuota = int(float64(preConsumedTokens) * ratio * consumeRatio)
 	} else {
+		consumeRatio = ratio_setting.GetModelConsumeRatio(info.OriginModelName)
 		if meta.ImagePriceRatio != 0 {
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
-		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * consumeRatio)
 	}
 
 	longContextMultiplier := ratio_setting.GetLongContextPricingMultiplier(info.OriginModelName, promptTokens)
@@ -103,7 +106,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 
 	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
-		if groupRatioInfo.GroupRatio == 0 {
+		if groupRatioInfo.GroupRatio == 0 || consumeRatio == 0 {
 			preConsumedQuota = 0
 			freeModel = true
 		} else if usePrice {
@@ -121,6 +124,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		FreeModel:             freeModel,
 		ModelPrice:            modelPrice,
 		ModelRatio:            modelRatio,
+		ConsumeRatio:          consumeRatio,
 		CompletionRatio:       completionRatio,
 		GroupRatioInfo:        groupRatioInfo,
 		UsePrice:              usePrice,
@@ -145,6 +149,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
+	consumeRatio := ratio_setting.GetModelConsumeRatio(info.OriginModelName)
 
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
 	if !success {
@@ -160,10 +165,10 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 		}
 	}
 
-	quota := int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+	quota := int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * consumeRatio)
 	freeModel := false
 	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
-		if groupRatioInfo.GroupRatio == 0 || modelPrice == 0 {
+		if groupRatioInfo.GroupRatio == 0 || modelPrice == 0 || consumeRatio == 0 {
 			quota = 0
 			freeModel = true
 		}
@@ -172,6 +177,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 	priceData := types.PriceData{
 		FreeModel:      freeModel,
 		ModelPrice:     modelPrice,
+		ConsumeRatio:   consumeRatio,
 		Quota:          quota,
 		GroupRatioInfo: groupRatioInfo,
 	}

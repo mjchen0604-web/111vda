@@ -313,10 +313,6 @@ func SweepEmbeddedChatInvalidAuths(c *gin.Context) {
 	proxyEmbeddedChat(c, http.MethodPost, "/api/actions/sweep_invalid_auths", nil, "")
 }
 
-func ProbeEmbeddedChatAuths(c *gin.Context) {
-	proxyEmbeddedChat(c, http.MethodPost, "/api/actions/probe_auths", nil, "")
-}
-
 func ProxyEmbeddedChatVersion(c *gin.Context) {
 	proxyEmbeddedChatPassthrough(c, http.MethodGet, "/api/version")
 }

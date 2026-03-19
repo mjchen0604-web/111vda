@@ -221,7 +221,6 @@ func SetApiRouter(router *gin.Engine) {
 			chatCoreAdminRoute.POST("/settings", controller.SaveEmbeddedChatSettings)
 			chatCoreAdminRoute.POST("/upload_auths", controller.UploadEmbeddedChatAuths)
 			chatCoreAdminRoute.POST("/sweep_invalid_auths", controller.SweepEmbeddedChatInvalidAuths)
-			chatCoreAdminRoute.POST("/probe_auths", controller.ProbeEmbeddedChatAuths)
 		}
 		ratioSyncRoute := apiRouter.Group("/ratio_sync")
 		ratioSyncRoute.Use(middleware.RootAuth())

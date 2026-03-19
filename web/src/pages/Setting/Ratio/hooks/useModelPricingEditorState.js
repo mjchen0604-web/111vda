@@ -9,6 +9,7 @@ const EMPTY_MODEL = {
   name: '',
   billingMode: 'per-token',
   fixedPrice: '',
+  consumeRatio: '',
   inputPrice: '',
   completionPrice: '',
   lockedCompletionRatio: '',
@@ -106,6 +107,7 @@ const buildModelState = (name, sourceMaps) => {
     sourceMaps.AudioCompletionRatio[name],
   );
   const fixedPrice = toNumericString(sourceMaps.ModelPrice[name]);
+  const consumeRatio = toNumericString(sourceMaps.ModelConsumeRatio?.[name]);
   const inputPrice = ratioToBasePrice(modelRatio);
   const inputPriceNumber = toNumberOrNull(inputPrice);
   const audioInputPrice =
@@ -118,6 +120,7 @@ const buildModelState = (name, sourceMaps) => {
     name,
     billingMode: hasValue(fixedPrice) ? 'per-request' : 'per-token',
     fixedPrice,
+    consumeRatio,
     inputPrice,
     completionRatioLocked: completionRatioMeta.locked,
     lockedCompletionRatio: completionRatioMeta.ratio,
@@ -249,6 +252,7 @@ export const buildSummaryText = (model, t) => {
 };
 
 export const buildOptionalFieldToggles = (model) => ({
+  consumeRatio: hasValue(model.consumeRatio) && Number(model.consumeRatio) !== 1,
   completionPrice: model.completionRatioLocked || hasValue(model.completionPrice),
   cachePrice: hasValue(model.cachePrice),
   createCachePrice: hasValue(model.createCachePrice),
@@ -260,6 +264,7 @@ export const buildOptionalFieldToggles = (model) => ({
 const serializeModel = (model, t) => {
   const result = {
     ModelPrice: null,
+    ModelConsumeRatio: null,
     ModelRatio: null,
     CompletionRatio: null,
     CacheRatio: null,
@@ -268,6 +273,11 @@ const serializeModel = (model, t) => {
     AudioRatio: null,
     AudioCompletionRatio: null,
   };
+
+  const consumeRatio = toNumberOrNull(model.consumeRatio);
+  if (consumeRatio !== null && consumeRatio !== 1) {
+    result.ModelConsumeRatio = consumeRatio;
+  }
 
   if (model.billingMode === 'per-request') {
     if (hasValue(model.fixedPrice)) {
@@ -372,6 +382,11 @@ export const buildPreviewRows = (model, t) => {
         label: 'ModelPrice',
         value: hasValue(model.fixedPrice) ? model.fixedPrice : t('空'),
       },
+      {
+        key: 'ModelConsumeRatio',
+        label: 'ModelConsumeRatio',
+        value: hasValue(model.consumeRatio) ? model.consumeRatio : t('空'),
+      },
     ];
   }
 
@@ -438,6 +453,11 @@ export const buildPreviewRows = (model, t) => {
   const audioOutputPrice = toNumberOrNull(model.audioOutputPrice);
 
   return [
+    {
+      key: 'ModelConsumeRatio',
+      label: 'ModelConsumeRatio',
+      value: hasValue(model.consumeRatio) ? model.consumeRatio : t('空'),
+    },
     {
       key: 'ModelRatio',
       label: 'ModelRatio',
@@ -509,6 +529,7 @@ export function useModelPricingEditorState({
   useEffect(() => {
     const sourceMaps = {
       ModelPrice: parseOptionJSON(options.ModelPrice),
+      ModelConsumeRatio: parseOptionJSON(options.ModelConsumeRatio),
       ModelRatio: parseOptionJSON(options.ModelRatio),
       CompletionRatio: parseOptionJSON(options.CompletionRatio),
       CompletionRatioMeta: parseOptionJSON(options.CompletionRatioMeta),
@@ -522,6 +543,7 @@ export function useModelPricingEditorState({
     const names = new Set([
       ...candidateModelNames,
       ...Object.keys(sourceMaps.ModelPrice),
+      ...Object.keys(sourceMaps.ModelConsumeRatio),
       ...Object.keys(sourceMaps.ModelRatio),
       ...Object.keys(sourceMaps.CompletionRatio),
       ...Object.keys(sourceMaps.CompletionRatioMeta),
@@ -728,6 +750,10 @@ export function useModelPricingEditorState({
     upsertModel(selectedModel.name, (model) => {
       const updatedModel = { ...model, [field]: value };
 
+      if (field === 'consumeRatio') {
+        return updatedModel;
+      }
+
       if (field === 'inputPrice') {
         return fillDerivedPricesFromBase(updatedModel, value);
       }
@@ -807,6 +833,7 @@ export function useModelPricingEditorState({
           ...model,
           billingMode: selectedModel.billingMode,
           fixedPrice: selectedModel.fixedPrice,
+          consumeRatio: selectedModel.consumeRatio,
           inputPrice: selectedModel.inputPrice,
           completionPrice: selectedModel.completionPrice,
           cachePrice: selectedModel.cachePrice,
@@ -836,6 +863,7 @@ export function useModelPricingEditorState({
       selectedModelNames.forEach((modelName) => {
         const targetModel = models.find((item) => item.name === modelName);
         next[modelName] = {
+          consumeRatio: Boolean(sourceToggles.consumeRatio),
           completionPrice: targetModel?.completionRatioLocked
             ? true
             : Boolean(sourceToggles.completionPrice),
@@ -865,6 +893,7 @@ export function useModelPricingEditorState({
     try {
       const output = {
         ModelPrice: {},
+        ModelConsumeRatio: {},
         ModelRatio: {},
         CompletionRatio: {},
         CacheRatio: {},

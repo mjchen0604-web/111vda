@@ -144,7 +144,6 @@ export default function SettingsChatCoreRuntime() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [probing, setProbing] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
   const [health, setHealth] = useState(null);
@@ -362,25 +361,6 @@ export default function SettingsChatCoreRuntime() {
       showError(getErrorMessage(error, '无效账号清理失败'));
     } finally {
       setSweeping(false);
-    }
-  };
-
-  const handleProbeAuths = async () => {
-    setProbing(true);
-    try {
-      const res = await API.post(
-        '/api/chatcore/admin/probe_auths',
-        {},
-        { skipErrorHandler: true },
-      );
-      showSuccess(
-        `已探活 ${res.data?.scanned || 0} 个凭证，隔离 ${res.data?.quarantined || 0} 个无效凭证`,
-      );
-      await fetchRuntimeState();
-    } catch (error) {
-      showError(getErrorMessage(error, '账号主动探活失败'));
-    } finally {
-      setProbing(false);
     }
   };
 
@@ -632,13 +612,6 @@ export default function SettingsChatCoreRuntime() {
                 <div style={{ marginTop: 12 }}>
                   <Button type='primary' onClick={handleUploadAuths} loading={uploading}>
                     上传 auth.json
-                  </Button>
-                  <Button
-                    style={{ marginLeft: 8 }}
-                    onClick={handleProbeAuths}
-                    loading={probing}
-                  >
-                    主动探活并隔离无效账号
                   </Button>
                   <Button
                     style={{ marginLeft: 8 }}

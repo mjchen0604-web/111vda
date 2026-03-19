@@ -12,6 +12,7 @@ type PriceData struct {
 	FreeModel             bool
 	ModelPrice            float64
 	ModelRatio            float64
+	ConsumeRatio          float64
 	CompletionRatio       float64
 	CacheRatio            float64
 	CacheCreationRatio    float64
@@ -41,9 +42,10 @@ func (p *PriceData) AddOtherRatio(key string, ratio float64) {
 
 func (p *PriceData) ToSetting() string {
 	return fmt.Sprintf(
-		"ModelPrice: %f, ModelRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, UsePrice: %t, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, QuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f, LongContextTriggered: %t, LongContextMultiplier: %f",
+		"ModelPrice: %f, ModelRatio: %f, ConsumeRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, UsePrice: %t, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, QuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f, LongContextTriggered: %t, LongContextMultiplier: %f",
 		p.ModelPrice,
 		p.ModelRatio,
+		p.ConsumeRatio,
 		p.CompletionRatio,
 		p.CacheRatio,
 		p.GroupRatioInfo.GroupRatio,
