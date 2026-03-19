@@ -28,10 +28,11 @@ type tokenPageResponse struct {
 }
 
 type tokenResponseItem struct {
-	ID     int    `json:"id"`
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Status int    `json:"status"`
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	Key            string `json:"key"`
+	Status         int    `json:"status"`
+	MaxConcurrency int    `json:"max_concurrency"`
 }
 
 type tokenKeyResponse struct {
@@ -111,6 +112,7 @@ func newAuthenticatedContext(t *testing.T, method string, target string, body an
 		ctx.Request.Header.Set("Content-Type", "application/json")
 	}
 	ctx.Set("id", userID)
+	ctx.Set("role", common.RoleCommonUser)
 	return ctx, recorder
 }
 
@@ -127,6 +129,10 @@ func decodeAPIResponse(t *testing.T, recorder *httptest.ResponseRecorder) tokenA
 func TestGetAllTokensMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "list-token", "abcd1234efgh5678")
+	token.MaxConcurrency = 6
+	if err := db.Save(token).Error; err != nil {
+		t.Fatalf("failed to update token concurrency: %v", err)
+	}
 	seedToken(t, db, 2, "other-user-token", "zzzz1234yyyy5678")
 
 	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?p=1&size=10", nil, 1)
@@ -146,6 +152,9 @@ func TestGetAllTokensMasksKeyInResponse(t *testing.T) {
 	}
 	if page.Items[0].Key != token.GetMaskedKey() {
 		t.Fatalf("expected masked key %q, got %q", token.GetMaskedKey(), page.Items[0].Key)
+	}
+	if page.Items[0].MaxConcurrency != 0 {
+		t.Fatalf("expected non-admin token concurrency to be masked, got %d", page.Items[0].MaxConcurrency)
 	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("list response leaked raw token key: %s", recorder.Body.String())
@@ -182,6 +191,10 @@ func TestSearchTokensMasksKeyInResponse(t *testing.T) {
 func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "detail-token", "qrst1234uvwx5678")
+	token.MaxConcurrency = 4
+	if err := db.Save(token).Error; err != nil {
+		t.Fatalf("failed to update token concurrency: %v", err)
+	}
 
 	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/"+strconv.Itoa(token.Id), nil, 1)
 	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
@@ -199,6 +212,9 @@ func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	if detail.Key != token.GetMaskedKey() {
 		t.Fatalf("expected masked detail key %q, got %q", token.GetMaskedKey(), detail.Key)
 	}
+	if detail.MaxConcurrency != 0 {
+		t.Fatalf("expected non-admin token concurrency to be masked, got %d", detail.MaxConcurrency)
+	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("detail response leaked raw token key: %s", recorder.Body.String())
 	}
@@ -207,6 +223,10 @@ func TestGetTokenMasksKeyInResponse(t *testing.T) {
 func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "editable-token", "yzab1234cdef5678")
+	token.MaxConcurrency = 5
+	if err := db.Save(token).Error; err != nil {
+		t.Fatalf("failed to seed token concurrency: %v", err)
+	}
 
 	body := map[string]any{
 		"id":                   token.Id,
@@ -218,6 +238,7 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 		"model_limits":         "",
 		"group":                "default",
 		"cross_group_retry":    false,
+		"max_concurrency":      99,
 	}
 
 	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", body, 1)
@@ -235,8 +256,61 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	if detail.Key != token.GetMaskedKey() {
 		t.Fatalf("expected masked update key %q, got %q", token.GetMaskedKey(), detail.Key)
 	}
+	if detail.MaxConcurrency != 0 {
+		t.Fatalf("expected non-admin token concurrency to be masked, got %d", detail.MaxConcurrency)
+	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("update response leaked raw token key: %s", recorder.Body.String())
+	}
+	var updated model.Token
+	if err := db.First(&updated, token.Id).Error; err != nil {
+		t.Fatalf("failed to reload updated token: %v", err)
+	}
+	if updated.MaxConcurrency != 5 {
+		t.Fatalf("expected non-admin update to preserve token concurrency 5, got %d", updated.MaxConcurrency)
+	}
+}
+
+func TestAdminUpdateTokenCanSetConcurrency(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "admin-token", "admin1234token5678")
+
+	body := map[string]any{
+		"id":                   token.Id,
+		"name":                 "admin-updated-token",
+		"expired_time":         -1,
+		"remain_quota":         100,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "default",
+		"cross_group_retry":    false,
+		"max_concurrency":      7,
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", body, 1)
+	ctx.Set("role", common.RoleAdminUser)
+	UpdateToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected admin update response to succeed, got message: %s", response.Message)
+	}
+
+	var detail tokenResponseItem
+	if err := common.Unmarshal(response.Data, &detail); err != nil {
+		t.Fatalf("failed to decode admin token update response: %v", err)
+	}
+	if detail.MaxConcurrency != 7 {
+		t.Fatalf("expected admin response to include token concurrency 7, got %d", detail.MaxConcurrency)
+	}
+
+	var updated model.Token
+	if err := db.First(&updated, token.Id).Error; err != nil {
+		t.Fatalf("failed to reload admin updated token: %v", err)
+	}
+	if updated.MaxConcurrency != 7 {
+		t.Fatalf("expected admin update to persist token concurrency 7, got %d", updated.MaxConcurrency)
 	}
 }
 

@@ -14,25 +14,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func buildMaskedTokenResponse(token *model.Token) *model.Token {
+func buildMaskedTokenResponse(token *model.Token, role int) *model.Token {
 	if token == nil {
 		return nil
 	}
 	maskedToken := *token
 	maskedToken.Key = token.GetMaskedKey()
+	if role < common.RoleAdminUser {
+		maskedToken.MaxConcurrency = 0
+	}
 	return &maskedToken
 }
 
-func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
+func buildMaskedTokenResponses(tokens []*model.Token, role int) []*model.Token {
 	maskedTokens := make([]*model.Token, 0, len(tokens))
 	for _, token := range tokens {
-		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
+		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token, role))
 	}
 	return maskedTokens
 }
 
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
+	role := c.GetInt("role")
 	pageInfo := common.GetPageQuery(c)
 	tokens, err := model.GetAllUserTokens(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
@@ -41,12 +45,13 @@ func GetAllTokens(c *gin.Context) {
 	}
 	total, _ := model.CountUserTokens(userId)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens, role))
 	common.ApiSuccess(c, pageInfo)
 }
 
 func SearchTokens(c *gin.Context) {
 	userId := c.GetInt("id")
+	role := c.GetInt("role")
 	keyword := c.Query("keyword")
 	token := c.Query("token")
 
@@ -58,13 +63,14 @@ func SearchTokens(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens, role))
 	common.ApiSuccess(c, pageInfo)
 }
 
 func GetToken(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")
+	role := c.GetInt("role")
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -74,7 +80,7 @@ func GetToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+	common.ApiSuccess(c, buildMaskedTokenResponse(token, role))
 }
 
 func GetTokenKey(c *gin.Context) {
@@ -171,11 +177,15 @@ func AddToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	canManageTokenConcurrency := c.GetInt("role") >= common.RoleAdminUser
+	if !canManageTokenConcurrency {
+		token.MaxConcurrency = 0
+	}
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
-	if token.MaxConcurrency < 0 {
+	if canManageTokenConcurrency && token.MaxConcurrency < 0 {
 		common.ApiErrorMsg(c, "并发上限不能小于 0")
 		return
 	}
@@ -262,6 +272,7 @@ func DeleteToken(c *gin.Context) {
 
 func UpdateToken(c *gin.Context) {
 	userId := c.GetInt("id")
+	role := c.GetInt("role")
 	statusOnly := c.Query("status_only")
 	token := model.Token{}
 	err := c.ShouldBindJSON(&token)
@@ -269,11 +280,15 @@ func UpdateToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	canManageTokenConcurrency := role >= common.RoleAdminUser
+	if !canManageTokenConcurrency {
+		token.MaxConcurrency = 0
+	}
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
-	if token.MaxConcurrency < 0 {
+	if canManageTokenConcurrency && token.MaxConcurrency < 0 {
 		common.ApiErrorMsg(c, "并发上限不能小于 0")
 		return
 	}
@@ -321,7 +336,9 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
-		cleanToken.MaxConcurrency = token.MaxConcurrency
+		if canManageTokenConcurrency {
+			cleanToken.MaxConcurrency = token.MaxConcurrency
+		}
 		cleanToken.QuotaResetPeriod = token.QuotaResetPeriod
 		cleanToken.QuotaResetCustomSeconds = token.QuotaResetCustomSeconds
 		cleanToken.QuotaResetAmount = token.RemainQuota
@@ -335,7 +352,7 @@ func UpdateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    buildMaskedTokenResponse(cleanToken),
+		"data":    buildMaskedTokenResponse(cleanToken, role),
 	})
 }
 
