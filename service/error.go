@@ -27,8 +27,14 @@ var nonRetryableBilling429Keywords = []string{
 	"quota exceeded",
 	"credit balance",
 	"out of credits",
-	"billing",
-	"credits",
+}
+
+var retryable429LimitKeywords = []string{
+	"usage limit",
+	"try again at",
+	"upgrade to plus to continue using codex",
+	"rate limit",
+	"too many requests",
 }
 
 func MidjourneyErrorWrapper(code int, desc string) *dto.MidjourneyResponse {
@@ -187,6 +193,11 @@ func shouldTreat429AsBillingError(message string) bool {
 	lowerMessage := strings.ToLower(strings.TrimSpace(message))
 	if lowerMessage == "" {
 		return false
+	}
+	for _, keyword := range retryable429LimitKeywords {
+		if strings.Contains(lowerMessage, keyword) {
+			return false
+		}
 	}
 	for _, keyword := range nonRetryableBilling429Keywords {
 		if strings.Contains(lowerMessage, keyword) {

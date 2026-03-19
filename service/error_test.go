@@ -96,3 +96,23 @@ func TestRelayErrorHandlerKeepsTrueRateLimit429(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, newAPIError.StatusCode)
 	require.False(t, types.IsSkipRetryError(newAPIError))
 }
+
+func TestRelayErrorHandlerKeepsCodexUsageLimit429(t *testing.T) {
+	t.Parallel()
+
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Body: io.NopCloser(strings.NewReader(
+			`{"error":{"type":"rate_limit_exceeded","message":"You have reached your included credits usage limit. Try again at Mar 21, 2026 9:00 AM or upgrade to Plus to continue using Codex."}}`,
+		)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusTooManyRequests, newAPIError.StatusCode)
+	require.False(t, types.IsSkipRetryError(newAPIError))
+
+	openAIError := newAPIError.ToOpenAIError()
+	require.NotEqual(t, "insufficient_quota", openAIError.Type)
+	require.NotEqual(t, "insufficient_quota", openAIError.Code)
+}
