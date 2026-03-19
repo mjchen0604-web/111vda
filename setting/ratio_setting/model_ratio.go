@@ -363,10 +363,10 @@ func addMinimalAlias(target map[string]float64, base string, value float64) {
 
 func seedDefaultGPTPricing() {
 	addTieredModelRatio(defaultModelRatio, "gpt-5.4", 2.5, 2.5, 2.5, 2.5)
-	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4", 4.5, 6.0, 7.5, 9.0)
+	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4", 6.0, 6.0, 6.0, 6.0)
 
 	addTieredModelRatio(defaultModelRatio, "gpt-5.4-fast", 5.0, 5.0, 5.0, 5.0)
-	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4-fast", 4.5, 6.0, 7.5, 9.0)
+	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4-fast", 6.0, 6.0, 6.0, 6.0)
 
 	addTieredModelRatio(defaultModelRatio, "gpt-5.4-mini", 0.1, 0.1, 0.1, 0.1)
 	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4-mini", 6.25, 6.25, 6.25, 6.25)

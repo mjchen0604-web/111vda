@@ -53,6 +53,12 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
 		}
 	}
+	if usage.TotalTokens == 0 && info != nil {
+		text := service.ExtractOutputTextFromResponses(&responsesResponse)
+		if text != "" {
+			usage = *service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
+		}
+	}
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
 		return &usage, nil
 	}
@@ -78,6 +84,31 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	textByKey := make(map[string]string)
+
+	appendResponseText := func(text string) {
+		if text == "" {
+			return
+		}
+		responseTextBuilder.WriteString(text)
+	}
+
+	appendResponseTextByKey := func(key string, text string) {
+		if text == "" {
+			return
+		}
+		if key == "" {
+			appendResponseText(text)
+			return
+		}
+		prev := textByKey[key]
+		if prev != "" && strings.HasPrefix(text, prev) {
+			appendResponseText(text[len(prev):])
+		} else {
+			appendResponseText(text)
+		}
+		textByKey[key] = text
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 
@@ -110,11 +141,33 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				}
 			case "response.output_text.delta":
 				// 处理输出文本
-				responseTextBuilder.WriteString(streamResponse.Delta)
+				key := responsesStreamIndexKey(strings.TrimSpace(streamResponse.ItemID), streamResponse.ContentIndex)
+				if key != "" && streamResponse.Delta != "" {
+					textByKey[key] += streamResponse.Delta
+				}
+				appendResponseText(streamResponse.Delta)
+			case "response.reasoning_summary_text.delta":
+				appendResponseText(streamResponse.Delta)
+			case "response.output_text.done":
+				key := responsesStreamIndexKey(strings.TrimSpace(streamResponse.ItemID), streamResponse.ContentIndex)
+				appendResponseTextByKey(key, streamResponse.Text)
+			case "response.content_part.done":
+				if streamResponse.Part != nil && streamResponse.Part.Type == "output_text" {
+					key := responsesStreamIndexKey(strings.TrimSpace(streamResponse.ItemID), streamResponse.ContentIndex)
+					appendResponseTextByKey(key, streamResponse.Part.Text)
+				}
 			case dto.ResponsesOutputTypeItemDone:
 				// 函数调用处理
 				if streamResponse.Item != nil {
 					switch streamResponse.Item.Type {
+					case "message":
+						var fullText strings.Builder
+						for _, content := range streamResponse.Item.Content {
+							if content.Type == "output_text" && content.Text != "" {
+								fullText.WriteString(content.Text)
+							}
+						}
+						appendResponseTextByKey(strings.TrimSpace(streamResponse.Item.ID), fullText.String())
 					case dto.BuildInCallWebSearchCall:
 						if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
 							if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {

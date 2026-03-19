@@ -621,16 +621,16 @@ export const calculateModelPrice = ({
   const gptPricingPreset = (() => {
     const presets = {
       'gpt-5.4': {
-        low: { input: 2.5, cache: 0.25, output: 11.25 },
+        low: { input: 2.5, cache: 0.25, output: 15.0 },
         medium: { input: 2.5, cache: 0.25, output: 15.0 },
-        high: { input: 2.5, cache: 0.25, output: 18.75 },
-        xhigh: { input: 2.5, cache: 0.25, output: 22.5 },
+        high: { input: 2.5, cache: 0.25, output: 15.0 },
+        xhigh: { input: 2.5, cache: 0.25, output: 15.0 },
       },
       'gpt-5.4-fast': {
-        low: { input: 5.0, cache: 0.5, output: 22.5 },
+        low: { input: 5.0, cache: 0.5, output: 30.0 },
         medium: { input: 5.0, cache: 0.5, output: 30.0 },
-        high: { input: 5.0, cache: 0.5, output: 37.5 },
-        xhigh: { input: 5.0, cache: 0.5, output: 45.0 },
+        high: { input: 5.0, cache: 0.5, output: 30.0 },
+        xhigh: { input: 5.0, cache: 0.5, output: 30.0 },
       },
       'gpt-5.4-mini': {
         low: { input: 0.2, cache: 0.025, output: 1.25 },

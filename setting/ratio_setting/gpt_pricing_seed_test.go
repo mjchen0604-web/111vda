@@ -52,8 +52,10 @@ func TestSeedDefaultGPTPricingUsesEffortSpecificOutputRatios(t *testing.T) {
 		model string
 		want  float64
 	}{
-		{model: "gpt-5.4-low", want: 4.5},
-		{model: "gpt-5.4-high", want: 7.5},
+		{model: "gpt-5.4-low", want: 6.0},
+		{model: "gpt-5.4-high", want: 6.0},
+		{model: "gpt-5.4-fast-low", want: 6.0},
+		{model: "gpt-5.4-fast-xhigh", want: 6.0},
 		{model: "gpt-5.4-mini-high", want: 6.25},
 		{model: "gpt-5.2-low", want: 6.0},
 		{model: "gpt-5.2-xhigh", want: 12.0},
