@@ -19,6 +19,7 @@ const (
 	ContextKeyTokenModelLimitEnabled ContextKey = "token_model_limit_enabled"
 	ContextKeyTokenModelLimit        ContextKey = "token_model_limit"
 	ContextKeyTokenCrossGroupRetry   ContextKey = "token_cross_group_retry"
+	ContextKeyTokenMaxConcurrency    ContextKey = "token_max_concurrency"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"
@@ -43,14 +44,15 @@ const (
 	ContextKeyAutoGroupRetryIndex ContextKey = "auto_group_retry_index"
 
 	/* user related keys */
-	ContextKeyUserId      ContextKey = "id"
-	ContextKeyUserSetting ContextKey = "user_setting"
-	ContextKeyUserQuota   ContextKey = "user_quota"
-	ContextKeyUserStatus  ContextKey = "user_status"
-	ContextKeyUserEmail   ContextKey = "user_email"
-	ContextKeyUserGroup   ContextKey = "user_group"
-	ContextKeyUsingGroup  ContextKey = "group"
-	ContextKeyUserName    ContextKey = "username"
+	ContextKeyUserId             ContextKey = "id"
+	ContextKeyUserSetting        ContextKey = "user_setting"
+	ContextKeyUserQuota          ContextKey = "user_quota"
+	ContextKeyUserStatus         ContextKey = "user_status"
+	ContextKeyUserEmail          ContextKey = "user_email"
+	ContextKeyUserGroup          ContextKey = "user_group"
+	ContextKeyUsingGroup         ContextKey = "group"
+	ContextKeyUserName           ContextKey = "username"
+	ContextKeyUserMaxConcurrency ContextKey = "user_max_concurrency"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 

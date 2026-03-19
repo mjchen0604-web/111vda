@@ -1904,70 +1904,81 @@ def probe_chatgpt_auth_candidates_and_quarantine_invalid() -> Dict[str, Any]:
         scanned += 1
         label = str(record.get("label") or "").strip()
         source = str(record.get("source") or "").strip()
-        auth_obj = _read_json_file(source) if source else None
-        candidate = None
-        changed = False
-        if isinstance(auth_obj, dict):
-            candidate, changed = _candidate_from_auth_obj(
-                auth_obj,
-                label=label,
-                ensure_fresh=True,
-                source_kind="auth_file",
-                source_path=source,
-            )
-            if changed and source:
-                _write_json_file(source, auth_obj)
+        try:
+            auth_obj = _read_json_file(source) if source else None
+            candidate = None
+            changed = False
+            if isinstance(auth_obj, dict):
+                candidate, changed = _candidate_from_auth_obj(
+                    auth_obj,
+                    label=label,
+                    ensure_fresh=True,
+                    source_kind="auth_file",
+                    source_path=source,
+                )
+                if changed and source:
+                    _write_json_file(source, auth_obj)
 
-        if candidate is None:
-            info = build_error_info(
-                source="probe",
-                phase="probe",
-                raw_status=401,
-                raw_message="Missing ChatGPT credentials",
-                raw_body={"message": "Missing ChatGPT credentials"},
-                category_override="account_invalid",
-            )
-        else:
-            info = _probe_chatgpt_candidate(candidate)
-
-        classification = classify_error(info)
-        status = int(info.get("raw_status") or 0) if isinstance(info.get("raw_status"), int) else None
-        if isinstance(status, int) and 200 <= status < 400:
-            classification = "ready"
-        message = str(info.get("raw_message") or "").strip()
-        raw_code = str(info.get("raw_code") or "").strip()
-
-        detail = {
-            "label": label,
-            "source": source,
-            "status": status,
-            "classification": classification,
-            "raw_code": raw_code,
-            "message": message,
-            "quarantined": False,
-        }
-
-        if classification == "account_invalid":
-            quarantine_candidate = candidate or {
-                "label": label,
-                "account_id": "",
-                "source_kind": "auth_file",
-                "source_path": source,
-                "source_index": None,
-            }
-            if quarantine_chatgpt_auth_candidate(quarantine_candidate, reason=message or raw_code or "Invalid account"):
-                quarantined += 1
-                detail["quarantined"] = True
-        elif candidate is not None:
-            if isinstance(status, int) and 200 <= status < 400:
-                mark_chatgpt_auth_result(
-                    label,
-                    success=True,
-                    status_code=status,
-                    account_id=str(candidate.get("account_id") or "").strip(),
+            if candidate is None:
+                info = build_error_info(
+                    source="probe",
+                    phase="probe",
+                    raw_status=401,
+                    raw_message="Missing ChatGPT credentials",
+                    raw_body={"message": "Missing ChatGPT credentials"},
+                    category_override="account_invalid",
                 )
             else:
-                handle_chatgpt_candidate_failure(candidate, info)
+                info = _probe_chatgpt_candidate(candidate)
+
+            classification = classify_error(info)
+            status = int(info.get("raw_status") or 0) if isinstance(info.get("raw_status"), int) else None
+            if isinstance(status, int) and 200 <= status < 400:
+                classification = "ready"
+            message = str(info.get("raw_message") or "").strip()
+            raw_code = str(info.get("raw_code") or "").strip()
+
+            detail = {
+                "label": label,
+                "source": source,
+                "status": status,
+                "classification": classification,
+                "raw_code": raw_code,
+                "message": message,
+                "quarantined": False,
+            }
+
+            if classification == "account_invalid":
+                quarantine_candidate = candidate or {
+                    "label": label,
+                    "account_id": "",
+                    "source_kind": "auth_file",
+                    "source_path": source,
+                    "source_index": None,
+                }
+                if quarantine_chatgpt_auth_candidate(quarantine_candidate, reason=message or raw_code or "Invalid account"):
+                    quarantined += 1
+                    detail["quarantined"] = True
+            elif candidate is not None:
+                if isinstance(status, int) and 200 <= status < 400:
+                    mark_chatgpt_auth_result(
+                        label,
+                        success=True,
+                        status_code=status,
+                        account_id=str(candidate.get("account_id") or "").strip(),
+                    )
+                else:
+                    handle_chatgpt_candidate_failure(candidate, info)
+        except Exception as exc:
+            detail = {
+                "label": label,
+                "source": source,
+                "status": 500,
+                "classification": "probe_internal_error",
+                "raw_code": "probe_internal_error",
+                "message": str(exc),
+                "quarantined": False,
+            }
 
         details.append(detail)
 

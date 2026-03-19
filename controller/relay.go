@@ -123,6 +123,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
+	releaseConcurrency, concurrencyErr := service.AcquireRequestConcurrency(c)
+	if concurrencyErr != nil {
+		newAPIError = concurrencyErr
+		return
+	}
+	defer releaseConcurrency()
+
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.

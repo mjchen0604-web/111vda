@@ -27,6 +27,7 @@ import {
   renderQuotaWithPrompt,
   getModelCategories,
   selectFilter,
+  isAdmin,
 } from '../../../../helpers';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import {
@@ -65,6 +66,7 @@ const EditTokenModal = (props) => {
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
   const isEdit = props.editingToken.id !== undefined;
+  const canEditTokenConcurrency = isAdmin();
 
   const getInitValues = () => ({
     name: '',
@@ -74,6 +76,7 @@ const EditTokenModal = (props) => {
     validity_value: 1,
     validity_custom_seconds: 0,
     unlimited_quota: true,
+    max_concurrency: 0,
     quota_reset_period: 'never',
     quota_reset_custom_seconds: 0,
     model_limits_enabled: false,
@@ -623,6 +626,19 @@ const EditTokenModal = (props) => {
                       )}
                     />
                   </Col>
+                  {canEditTokenConcurrency && (
+                    <Col span={24}>
+                      <Form.InputNumber
+                        field='max_concurrency'
+                        label={t('密钥并发上限')}
+                        placeholder={t('0 表示不限')}
+                        min={0}
+                        precision={0}
+                        extraText={t('仅管理员可设置，限制该密钥可同时处理的请求数')}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                  )}
                 </Row>
               </Card>
 

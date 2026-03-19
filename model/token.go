@@ -28,6 +28,7 @@ type Token struct {
 	AllowIps                *string        `json:"allow_ips" gorm:"default:''"`
 	UsedQuota               int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group                   string         `json:"group" gorm:"default:''"`
+	MaxConcurrency          int            `json:"max_concurrency" gorm:"type:int;default:0"`
 	CrossGroupRetry         bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	QuotaResetPeriod        string         `json:"quota_reset_period" gorm:"type:varchar(16);default:'never'"`
 	QuotaResetCustomSeconds int64          `json:"quota_reset_custom_seconds" gorm:"type:bigint;default:0"`
@@ -446,7 +447,7 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry",
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "max_concurrency",
 		"quota_reset_period", "quota_reset_custom_seconds", "quota_reset_amount",
 		"last_reset_time", "next_reset_time").Updates(token).Error
 	return err

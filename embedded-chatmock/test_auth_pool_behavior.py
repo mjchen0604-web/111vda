@@ -215,6 +215,48 @@ class AuthPoolBehaviorTests(unittest.TestCase):
             else:
                 os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = original_settings_path
 
+    def test_probe_survives_single_credential_exception(self):
+        original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
+        original_data_dir = os.environ.get("CHATMOCK_DATA_DIR")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                accounts_root = Path(temp_dir) / "accounts"
+                auth1 = accounts_root / "acc01" / "auth.json"
+                auth2 = accounts_root / "acc02" / "auth.json"
+                auth1.parent.mkdir(parents=True, exist_ok=True)
+                auth2.parent.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "tokens": {
+                        "account_id": "same-account",
+                        "access_token": "token-value",
+                    }
+                }
+                auth1.write_text(json.dumps(payload), encoding="utf-8")
+                auth2.write_text(json.dumps(payload), encoding="utf-8")
+                os.environ["CHATMOCK_DATA_DIR"] = temp_dir
+                os.environ["CHATGPT_LOCAL_AUTH_FILES"] = f"{auth1},{auth2}"
+
+                def fake_probe(candidate):
+                    if candidate.get("source_path") == str(auth1):
+                        raise RuntimeError("boom")
+                    return {"raw_status": 200, "raw_message": "ok"}
+
+                with patch("chatmock.utils._probe_chatgpt_candidate", side_effect=fake_probe):
+                    result = probe_chatgpt_auth_candidates_and_quarantine_invalid()
+
+                self.assertEqual(result["scanned"], 2)
+                self.assertTrue(any(item["classification"] == "probe_internal_error" for item in result["details"]))
+                self.assertTrue(any(item["classification"] == "ready" for item in result["details"]))
+        finally:
+            if original_auth_files is None:
+                os.environ.pop("CHATGPT_LOCAL_AUTH_FILES", None)
+            else:
+                os.environ["CHATGPT_LOCAL_AUTH_FILES"] = original_auth_files
+            if original_data_dir is None:
+                os.environ.pop("CHATMOCK_DATA_DIR", None)
+            else:
+                os.environ["CHATMOCK_DATA_DIR"] = original_data_dir
+
     def test_success_writeback_normalizes_non_2xx_status_to_ready_200(self):
         mark_chatgpt_auth_result(
             "acc01/auth.json",

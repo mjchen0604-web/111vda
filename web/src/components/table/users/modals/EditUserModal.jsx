@@ -85,6 +85,7 @@ const EditUserModal = (props) => {
     linux_do_id: '',
     email: '',
     quota: 0,
+    max_concurrency: 0,
     group: 'default',
     remark: '',
   });
@@ -316,6 +317,18 @@ const EditUserModal = (props) => {
                       </Col>
 
                       <Col span={14}>
+                        <Form.InputNumber
+                          field='max_concurrency'
+                          label={t('个人并发上限')}
+                          placeholder={t('0 表示不限')}
+                          min={0}
+                          precision={0}
+                          extraText={t('限制该用户所有密钥合计可同时处理的请求数')}
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+
+                      <Col span={24}>
                         <Form.Slot label={t('添加额度')}>
                           <Button
                             icon={<IconPlus />}

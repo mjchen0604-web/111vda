@@ -175,6 +175,10 @@ func AddToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
+	if token.MaxConcurrency < 0 {
+		common.ApiErrorMsg(c, "并发上限不能小于 0")
+		return
+	}
 	// 非无限额度时，检查额度值是否超出有效范围
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
@@ -226,6 +230,7 @@ func AddToken(c *gin.Context) {
 		AllowIps:                token.AllowIps,
 		Group:                   token.Group,
 		CrossGroupRetry:         token.CrossGroupRetry,
+		MaxConcurrency:          token.MaxConcurrency,
 		QuotaResetPeriod:        token.QuotaResetPeriod,
 		QuotaResetCustomSeconds: token.QuotaResetCustomSeconds,
 	}
@@ -266,6 +271,10 @@ func UpdateToken(c *gin.Context) {
 	}
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
+		return
+	}
+	if token.MaxConcurrency < 0 {
+		common.ApiErrorMsg(c, "并发上限不能小于 0")
 		return
 	}
 	if !token.UnlimitedQuota {
@@ -312,6 +321,7 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		cleanToken.MaxConcurrency = token.MaxConcurrency
 		cleanToken.QuotaResetPeriod = token.QuotaResetPeriod
 		cleanToken.QuotaResetCustomSeconds = token.QuotaResetCustomSeconds
 		cleanToken.QuotaResetAmount = token.RemainQuota
