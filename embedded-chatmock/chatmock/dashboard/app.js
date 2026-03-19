@@ -200,7 +200,7 @@ function renderLogs(payload) {
 function readSettingsForm() {
   return {
     routingStrategy: nodes.setRoutingStrategy?.value || "round-robin",
-    requestRetry: Number(nodes.setRequestRetry?.value || 2),
+    requestRetry: Number(nodes.setRequestRetry?.value || 0),
     maxRetryInterval: Number(nodes.setMaxRetryInterval?.value || 5),
     reasoningEffort: nodes.setReasoningEffort?.value || "medium",
     reasoningSummary: nodes.setReasoningSummary?.value || "auto",
@@ -224,7 +224,7 @@ function applySettingsForm(settings = {}) {
     nodes.setRoutingStrategy.value = settings.routingStrategy || "round-robin";
   }
   if (nodes.setRequestRetry) {
-    nodes.setRequestRetry.value = String(settings.requestRetry ?? 2);
+    nodes.setRequestRetry.value = String(settings.requestRetry ?? 0);
   }
   if (nodes.setMaxRetryInterval) {
     nodes.setMaxRetryInterval.value = String(settings.maxRetryInterval ?? 5);

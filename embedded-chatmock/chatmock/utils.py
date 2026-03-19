@@ -1352,11 +1352,11 @@ def claim_chatgpt_auth_candidate(
 
 
 def get_request_retry_limit() -> int:
-    raw = (os.getenv("CHATGPT_LOCAL_REQUEST_RETRY") or "2").strip()
+    raw = (os.getenv("CHATGPT_LOCAL_REQUEST_RETRY") or "0").strip()
     try:
         value = int(raw)
     except Exception:
-        value = 2
+        value = 0
     return max(0, min(10, value))
 
 
