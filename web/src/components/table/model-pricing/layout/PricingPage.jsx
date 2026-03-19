@@ -197,6 +197,8 @@ const PricingPage = () => {
         vendorsMap={pricingData.vendorsMap}
         endpointMap={pricingData.endpointMap}
         autoGroups={pricingData.autoGroups}
+        isAdmin={isAdmin}
+        refreshPricing={pricingData.refresh}
         t={pricingData.t}
       />
     </div>

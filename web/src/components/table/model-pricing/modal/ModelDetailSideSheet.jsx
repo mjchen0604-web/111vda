@@ -26,6 +26,7 @@ import ModelHeader from './components/ModelHeader';
 import ModelBasicInfo from './components/ModelBasicInfo';
 import ModelEndpoints from './components/ModelEndpoints';
 import ModelPricingTable from './components/ModelPricingTable';
+import AdminConsumeRatioCard from './components/AdminConsumeRatioCard';
 
 const { Text } = Typography;
 
@@ -43,6 +44,8 @@ const ModelDetailSideSheet = ({
   vendorsMap,
   endpointMap,
   autoGroups,
+  isAdmin,
+  refreshPricing,
   t,
 }) => {
   const isMobile = useIsMobile();
@@ -101,6 +104,13 @@ const ModelDetailSideSheet = ({
               autoGroups={autoGroups}
               t={t}
             />
+            {isAdmin ? (
+              <AdminConsumeRatioCard
+                modelName={modelData?.model_name}
+                refreshPricing={refreshPricing}
+                t={t}
+              />
+            ) : null}
           </>
         )}
       </div>
