@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Tuple
 from flask import Blueprint, Response, current_app, jsonify, make_response, request
 
 from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS
+from .context_compaction import maybe_compact_input_items
 from .http import build_cors_headers
 from .limits import record_rate_limits_from_response
+from .responses_session import is_previous_response_not_found, resolve_turn_state, save_response_session
 from .reasoning import (
     allowed_efforts_for_model,
     build_reasoning_param,
@@ -26,7 +28,9 @@ from .upstream_errors import (
 )
 from .upstream import normalize_model_name, start_upstream_request
 from .thread_sessions import resolve_thread_session_state
+from .usage_passthrough import extract_responses_usage_from_event, to_anthropic_usage
 from .utils import (
+    RetryableStreamError,
     extract_response_output_text,
     merge_response_text,
     restore_reserved_tool_name,
@@ -78,12 +82,6 @@ def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_t
 
 
 def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None = None) -> str | None:
-    request_value = payload.get("service_tier")
-    if isinstance(request_value, str):
-        normalized = request_value.strip().lower()
-        if normalized in ("", "off", "none", "unset"):
-            return None
-        return normalized
     alias_value = extract_service_tier_from_model_name(requested_model)
     if isinstance(alias_value, str) and alias_value:
         return alias_value
@@ -112,18 +110,6 @@ def _decode_json_body(raw: str) -> Dict[str, Any] | None:
             return json.loads(raw.lstrip("\ufeff")) if raw else {}
         except Exception:
             return None
-
-
-def _extract_usage(evt: Dict[str, Any]) -> Tuple[int, int]:
-    try:
-        usage = (evt.get("response") or {}).get("usage")
-        if not isinstance(usage, dict):
-            return 0, 0
-        prompt_tokens = int(usage.get("input_tokens") or 0)
-        completion_tokens = int(usage.get("output_tokens") or 0)
-        return prompt_tokens, completion_tokens
-    except Exception:
-        return 0, 0
 
 
 def _system_to_text(system_payload: Any) -> str:
@@ -384,7 +370,7 @@ def _tool_use_payload_from_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
     }
 
 
-def _anthropic_stream(upstream, model_out: str, verbose: bool):
+def _anthropic_stream(upstream, model_out: str, verbose: bool, *, on_completed=None):
     def _emit(event: str, payload: Dict[str, Any]):
         data = f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
         if verbose:
@@ -396,13 +382,13 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
 
     response_id = f"msg_{uuid.uuid4().hex}"
     stop_reason = "end_turn"
-    usage_in = 0
-    usage_out = 0
+    usage_obj: Dict[str, Any] | None = None
     next_block_index = 0
     text_open = False
     text_index = -1
     emitted_output_text = ""
     saw_completed = False
+    has_visible_output = False
 
     def _emit_text_delta(delta_text: str) -> str | None:
         nonlocal text_open, text_index, next_block_index, emitted_output_text
@@ -442,7 +428,7 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                     "content": [],
                     "stop_reason": None,
                     "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                    "usage": usage_obj or {"input_tokens": 0, "output_tokens": 0},
                 },
             },
         )
@@ -464,16 +450,15 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
             except Exception:
                 continue
 
-            prompt_tokens, completion_tokens = _extract_usage(evt)
-            if prompt_tokens:
-                usage_in = prompt_tokens
-            if completion_tokens:
-                usage_out = completion_tokens
+            extracted_usage = extract_responses_usage_from_event(evt)
+            if extracted_usage:
+                usage_obj = to_anthropic_usage(extracted_usage)
 
             kind = evt.get("type")
             if kind == "response.output_text.delta":
                 delta = evt.get("delta") or ""
                 if isinstance(delta, str) and delta:
+                    has_visible_output = True
                     for chunk in _emit_text_delta(delta):
                         yield chunk
                 continue
@@ -484,6 +469,7 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                     evt.get("text") or "",
                 )
                 if missing_delta:
+                    has_visible_output = True
                     for chunk in _emit_text_delta(missing_delta):
                         yield chunk
                 continue
@@ -495,6 +481,7 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                     part.get("text") or "",
                 )
                 if missing_delta:
+                    has_visible_output = True
                     for chunk in _emit_text_delta(missing_delta):
                         yield chunk
                 continue
@@ -508,9 +495,11 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                         extract_response_output_text(item),
                     )
                     if missing_delta:
+                        has_visible_output = True
                         for chunk in _emit_text_delta(missing_delta):
                             yield chunk
                     continue
+                has_visible_output = True
                 if text_open:
                     yield _emit("content_block_stop", {"type": "content_block_stop", "index": text_index})
                     text_open = False
@@ -548,17 +537,27 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
                     "stream",
                     evt.get("response"),
                 )
+                if not has_visible_output and (
+                    should_retry_next_candidate(error_info) or is_previous_response_not_found(error_info)
+                ):
+                    raise RetryableStreamError(error_info)
                 payload = build_anthropic_error_response(error_info).get_json()
                 yield _emit("error", payload)
                 return
 
             if kind == "response.completed":
                 saw_completed = True
+                if callable(on_completed) and isinstance(evt.get("response"), dict):
+                    try:
+                        on_completed(evt.get("response"), upstream)
+                    except Exception:
+                        pass
                 emitted_output_text, missing_delta = merge_response_text(
                     emitted_output_text,
                     extract_response_output_text(evt.get("response")),
                 )
                 if missing_delta:
+                    has_visible_output = True
                     for chunk in _emit_text_delta(missing_delta):
                         yield chunk
                 break
@@ -582,7 +581,7 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
             {
                 "type": "message_delta",
                 "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                "usage": {"input_tokens": usage_in, "output_tokens": usage_out},
+                "usage": usage_obj or {"input_tokens": 0, "output_tokens": 0},
             },
         )
         yield _emit("message_stop", {"type": "message_stop"})
@@ -590,129 +589,53 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool):
         upstream.close()
 
 
-@anthropic_bp.route("/v1/messages", methods=["POST"])
-def messages() -> Response:
-    verbose = bool(current_app.config.get("VERBOSE"))
-    debug_model = current_app.config.get("DEBUG_MODEL")
-    reasoning_effort = current_app.config.get("REASONING_EFFORT", "medium")
-    reasoning_summary = current_app.config.get("REASONING_SUMMARY", "auto")
+def _build_anthropic_message_response(
+    *,
+    model_out: str,
+    service_tier: str | None,
+    response_id: str,
+    full_text: str,
+    tool_calls: List[Dict[str, Any]],
+    usage_obj: Dict[str, Any] | None,
+    observed_service_tier: str | None,
+) -> Dict[str, Any]:
+    content: List[Dict[str, Any]] = []
+    stop_reason = "end_turn"
+    if full_text:
+        content.append({"type": "text", "text": full_text})
+    if tool_calls:
+        stop_reason = "tool_use"
+        content.extend([{"type": "tool_use", **tool_call} for tool_call in tool_calls])
 
-    raw = request.get_data(cache=True, as_text=True) or ""
-    if verbose:
-        try:
-            print("IN POST /v1/messages\n" + raw)
-        except Exception:
-            pass
-
-    payload = _decode_json_body(raw)
-    if payload is None:
-        return _error_response("invalid JSON body", 400, "invalid_request_error")
-
-    requested_model = payload.get("model")
-    model = normalize_model_name(requested_model, debug_model)
-
-    input_items, msg_err = _convert_anthropic_messages_to_input(payload.get("messages"))
-    if msg_err:
-        return _error_response(msg_err, 400, "invalid_request_error")
-    assert isinstance(input_items, list)
-    if not input_items:
-        return _error_response("messages must include at least one content block", 400, "invalid_request_error")
-
-    system_text = _system_to_text(payload.get("system")).strip()
-    instructions = _resolve_bridge_instructions(model, payload) or ""
-    if system_text:
-        instructions = (instructions + "\n\n" + system_text).strip() if instructions else system_text
-
-    tools_responses, tools_err = _convert_anthropic_tools(payload.get("tools"))
-    if tools_err:
-        return _error_response(tools_err, 400, "invalid_request_error")
-    assert isinstance(tools_responses, list)
-
-    tool_choice, parallel_tool_calls, tool_choice_err = _convert_anthropic_tool_choice(payload.get("tool_choice"))
-    if tool_choice_err:
-        return _error_response(tool_choice_err, 400, "invalid_request_error")
-    if isinstance(payload.get("parallel_tool_calls"), bool):
-        parallel_tool_calls = bool(payload.get("parallel_tool_calls"))
-
-    model_reasoning = extract_reasoning_from_model_name(requested_model)
-    reasoning_overrides = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else model_reasoning
-    service_tier = _resolve_service_tier(payload, requested_model)
-    thread_session = resolve_thread_session_state(
-        payload=payload,
-        input_items=input_items,
-        headers=request.headers,
+    message_obj = {
+        "id": response_id,
+        "type": "message",
+        "role": "assistant",
+        "model": model_out,
+        "content": content,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": usage_obj or {"input_tokens": 0, "output_tokens": 0},
+    }
+    presented_service_tier = (
+        presented_service_tier_name(service_tier, observed_service_tier)
+        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
+        else None
     )
-    reasoning_param = build_reasoning_param(
-        reasoning_effort,
-        reasoning_summary,
-        reasoning_overrides,
-        allowed_efforts=allowed_efforts_for_model(model),
-    )
+    if presented_service_tier:
+        message_obj["service_tier"] = presented_service_tier
+    return message_obj
 
-    model_out = requested_model or model
-    is_stream = bool(payload.get("stream"))
-    attempt_limit = _upstream_attempt_limit(is_stream, model, service_tier)
-    last_error_info: Dict[str, Any] | None = None
-    upstream = None
-    for attempt_index in range(attempt_limit):
-        upstream, error_resp = start_upstream_request(
-            model,
-            input_items,
-            instructions=instructions,
-            tools=tools_responses,
-            tool_choice=tool_choice,
-            parallel_tool_calls=parallel_tool_calls,
-            reasoning_param=reasoning_param,
-            service_tier=service_tier,
-            thread_session=thread_session,
-        )
-        if error_resp is not None:
-            error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
-            last_error_info = error_info
-            if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
-                continue
-            return build_anthropic_error_response(error_info)
 
-        record_rate_limits_from_response(upstream)
-        if upstream.status_code >= 400:
-            try:
-                upstream.close()
-            except Exception:
-                pass
-            error_info = error_info_from_http_response(getattr(upstream, "chatmock_source", "upstream"), "http", upstream)
-            last_error_info = error_info
-            if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
-                continue
-            return build_anthropic_error_response(error_info)
-        break
-
-    if upstream is None:
-        return build_anthropic_error_response(
-            last_error_info
-            or build_error_info(
-                source="chatcore",
-                phase="retry_exhausted",
-                raw_status=502,
-                raw_message="No candidate succeeded",
-                raw_body={"message": "No candidate succeeded"},
-            )
-        )
-
-    if is_stream:
-        resp = Response(
-            _anthropic_stream(upstream, model_out, verbose),
-            status=upstream.status_code,
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-        )
-        for k, v in build_cors_headers().items():
-            resp.headers.setdefault(k, v)
-        return resp
-
+def _consume_anthropic_nonstream(
+    upstream,
+    *,
+    model_out: str,
+    service_tier: str | None,
+) -> Dict[str, Any]:
     full_text = ""
     tool_calls: List[Dict[str, Any]] = []
-    usage_in = 0
-    usage_out = 0
+    usage_obj: Dict[str, Any] | None = None
     response_id = f"msg_{uuid.uuid4().hex}"
     error_message: str | None = None
     error_info: Dict[str, Any] | None = None
@@ -735,11 +658,9 @@ def messages() -> Response:
             except Exception:
                 continue
 
-            prompt_tokens, completion_tokens = _extract_usage(evt)
-            if prompt_tokens:
-                usage_in = prompt_tokens
-            if completion_tokens:
-                usage_out = completion_tokens
+            extracted_usage = extract_responses_usage_from_event(evt)
+            if extracted_usage:
+                usage_obj = to_anthropic_usage(extracted_usage)
             if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("id"), str):
                 response_id = evt["response"].get("id") or response_id
             if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("service_tier"), str):
@@ -799,44 +720,258 @@ def messages() -> Response:
                 raw_message=error_message,
                 raw_body={"message": error_message},
             )
-        return build_anthropic_error_response(error_info)
+        return {"ok": False, "error_info": error_info}
 
     if not completed_ok and not full_text and not tool_calls:
-        return build_anthropic_error_response(
-            build_error_info(
+        return {
+            "ok": False,
+            "error_info": build_error_info(
                 source=getattr(upstream, "chatmock_source", "upstream"),
                 phase="stream",
                 raw_status=int(getattr(upstream, "status_code", 502) or 502),
                 raw_message="stream ended before response.completed",
                 raw_body={"message": "stream ended before response.completed"},
+            ),
+        }
+
+    return {
+        "ok": True,
+        "response_id": response_id,
+        "message_obj": _build_anthropic_message_response(
+            model_out=model_out,
+            service_tier=service_tier,
+            response_id=response_id,
+            full_text=full_text,
+            tool_calls=tool_calls,
+            usage_obj=usage_obj,
+            observed_service_tier=observed_service_tier,
+        ),
+    }
+
+
+@anthropic_bp.route("/v1/messages", methods=["POST"])
+def messages() -> Response:
+    verbose = bool(current_app.config.get("VERBOSE"))
+    debug_model = current_app.config.get("DEBUG_MODEL")
+    reasoning_effort = current_app.config.get("REASONING_EFFORT", "medium")
+    reasoning_summary = current_app.config.get("REASONING_SUMMARY", "auto")
+
+    raw = request.get_data(cache=True, as_text=True) or ""
+    if verbose:
+        try:
+            print("IN POST /v1/messages\n" + raw)
+        except Exception:
+            pass
+
+    payload = _decode_json_body(raw)
+    if payload is None:
+        return _error_response("invalid JSON body", 400, "invalid_request_error")
+
+    requested_model = payload.get("model")
+    model = normalize_model_name(requested_model, debug_model)
+
+    input_items, msg_err = _convert_anthropic_messages_to_input(payload.get("messages"))
+    if msg_err:
+        return _error_response(msg_err, 400, "invalid_request_error")
+    assert isinstance(input_items, list)
+    if not input_items:
+        return _error_response("messages must include at least one content block", 400, "invalid_request_error")
+
+    system_text = _system_to_text(payload.get("system")).strip()
+    instructions = _resolve_bridge_instructions(model, payload) or ""
+    if system_text:
+        instructions = (instructions + "\n\n" + system_text).strip() if instructions else system_text
+
+    tools_responses, tools_err = _convert_anthropic_tools(payload.get("tools"))
+    if tools_err:
+        return _error_response(tools_err, 400, "invalid_request_error")
+    assert isinstance(tools_responses, list)
+
+    tool_choice, parallel_tool_calls, tool_choice_err = _convert_anthropic_tool_choice(payload.get("tool_choice"))
+    if tool_choice_err:
+        return _error_response(tool_choice_err, 400, "invalid_request_error")
+    if isinstance(payload.get("parallel_tool_calls"), bool):
+        parallel_tool_calls = bool(payload.get("parallel_tool_calls"))
+
+    model_reasoning = extract_reasoning_from_model_name(requested_model)
+    reasoning_overrides = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else model_reasoning
+    service_tier = _resolve_service_tier(payload, requested_model)
+    reasoning_param = build_reasoning_param(
+        reasoning_effort,
+        reasoning_summary,
+        reasoning_overrides,
+        allowed_efforts=allowed_efforts_for_model(model),
+    )
+    input_items, instructions, _ = maybe_compact_input_items(payload, input_items, instructions)
+    thread_session = resolve_thread_session_state(
+        payload=payload,
+        input_items=input_items,
+        headers=request.headers,
+    )
+    full_input_items = list(input_items)
+    effective_input_items, effective_previous_response_id = resolve_turn_state(
+        payload,
+        full_input_items,
+        thread_session,
+    )
+    extra_payload = {}
+    if effective_previous_response_id:
+        extra_payload["previous_response_id"] = effective_previous_response_id
+
+    model_out = requested_model or model
+    is_stream = bool(payload.get("stream"))
+    attempt_limit = _upstream_attempt_limit(is_stream, model, service_tier)
+    last_error_info: Dict[str, Any] | None = None
+    upstream = None
+    for attempt_index in range(attempt_limit):
+        upstream, error_resp = start_upstream_request(
+            model,
+            effective_input_items,
+            instructions=instructions,
+            tools=tools_responses,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            reasoning_param=reasoning_param,
+            service_tier=service_tier,
+            thread_session=thread_session,
+            extra_payload=extra_payload,
+        )
+        if error_resp is not None:
+            error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
+            last_error_info = error_info
+            if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
+                continue
+            return build_anthropic_error_response(error_info)
+
+        record_rate_limits_from_response(upstream)
+        if upstream.status_code >= 400:
+            try:
+                upstream.close()
+            except Exception:
+                pass
+            error_info = error_info_from_http_response(getattr(upstream, "chatmock_source", "upstream"), "http", upstream)
+            last_error_info = error_info
+            if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
+                continue
+            return build_anthropic_error_response(error_info)
+        break
+
+    if upstream is None:
+        return build_anthropic_error_response(
+            last_error_info
+            or build_error_info(
+                source="chatcore",
+                phase="retry_exhausted",
+                raw_status=502,
+                raw_message="No candidate succeeded",
+                raw_body={"message": "No candidate succeeded"},
             )
         )
 
-    content: List[Dict[str, Any]] = []
-    stop_reason = "end_turn"
-    if full_text:
-        content.append({"type": "text", "text": full_text})
-    if tool_calls:
-        stop_reason = "tool_use"
-        content.extend([{"type": "tool_use", **tool_call} for tool_call in tool_calls])
+    if is_stream:
+        def _retrying_stream():
+            current_upstream = upstream
+            recovered_previous_response = False
+            while True:
+                try:
+                    yield from _anthropic_stream(
+                        current_upstream,
+                        model_out,
+                        verbose,
+                        on_completed=lambda response_obj, completed_upstream: save_response_session(
+                            thread_session,
+                            response_obj=response_obj,
+                            full_input_items=full_input_items,
+                            upstream=completed_upstream,
+                        ),
+                    )
+                    return
+                except RetryableStreamError as exc:
+                    if (
+                        effective_previous_response_id
+                        and not recovered_previous_response
+                        and is_previous_response_not_found(exc.error_info)
+                    ):
+                        retry_extra_payload = dict(extra_payload)
+                        retry_extra_payload.pop("previous_response_id", None)
+                        next_upstream, next_error = start_upstream_request(
+                            model,
+                            full_input_items,
+                            instructions=instructions,
+                            tools=tools_responses,
+                            tool_choice=tool_choice,
+                            parallel_tool_calls=parallel_tool_calls,
+                            reasoning_param=reasoning_param,
+                            service_tier=service_tier,
+                            thread_session=thread_session,
+                            extra_payload=retry_extra_payload,
+                        )
+                        if next_error is not None:
+                            next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
+                            payload = build_anthropic_error_response(next_error_info).get_json()
+                            yield f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                            return
+                        current_upstream = next_upstream
+                        recovered_previous_response = True
+                        continue
+                    payload = build_anthropic_error_response(exc.error_info).get_json()
+                    yield f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    return
 
-    message_obj = {
-        "id": response_id,
-        "type": "message",
-        "role": "assistant",
-        "model": model_out,
-        "content": content,
-        "stop_reason": stop_reason,
-        "stop_sequence": None,
-        "usage": {"input_tokens": usage_in, "output_tokens": usage_out},
-    }
-    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
-    if presented_service_tier:
-        message_obj["service_tier"] = presented_service_tier
+        resp = Response(
+            _retrying_stream(),
+            status=upstream.status_code,
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+        for k, v in build_cors_headers().items():
+            resp.headers.setdefault(k, v)
+        return resp
+
+    completed_upstream = upstream
+    result = _consume_anthropic_nonstream(
+        upstream,
+        model_out=model_out,
+        service_tier=service_tier,
+    )
+    if not result.get("ok") and effective_previous_response_id and is_previous_response_not_found(result.get("error_info")):
+        retry_extra_payload = dict(extra_payload)
+        retry_extra_payload.pop("previous_response_id", None)
+        retry_upstream, retry_error = start_upstream_request(
+            model,
+            full_input_items,
+            instructions=instructions,
+            tools=tools_responses,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            reasoning_param=reasoning_param,
+            service_tier=service_tier,
+            thread_session=thread_session,
+            extra_payload=retry_extra_payload,
+        )
+        if retry_error is None and retry_upstream is not None and retry_upstream.status_code < 400:
+            completed_upstream = retry_upstream
+            result = _consume_anthropic_nonstream(
+                retry_upstream,
+                model_out=model_out,
+                service_tier=service_tier,
+            )
+
+    if not result.get("ok"):
+        return build_anthropic_error_response(result.get("error_info"))
+
+    message_obj = result.get("message_obj") or {}
+    response_id = result.get("response_id")
     if verbose:
         _log_json("OUT POST /v1/messages", message_obj)
 
-    resp = make_response(jsonify(message_obj), upstream.status_code)
+    save_response_session(
+        thread_session,
+        response_id=response_id,
+        full_input_items=full_input_items,
+        upstream=completed_upstream,
+    )
+    resp = make_response(jsonify(message_obj), completed_upstream.status_code)
     for k, v in build_cors_headers().items():
         resp.headers.setdefault(k, v)
     return resp

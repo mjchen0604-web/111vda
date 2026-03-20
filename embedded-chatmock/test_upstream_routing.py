@@ -59,7 +59,7 @@ class UpstreamRoutingTests(unittest.TestCase):
             "maxRetryInterval": 5,
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
-            "reasoningCompat": "think-tags",
+            "reasoningCompat": "current",
             "exposeReasoningModels": False,
             "enableWebSearch": True,
             "verbose": False,

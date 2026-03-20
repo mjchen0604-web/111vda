@@ -23,6 +23,9 @@ import (
 )
 
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
+	// Visible <think> output is now unified under the playground-only button.
+	// Channel-side thinking_to_content is deprecated and ignored here.
+	thinkToContent = false
 	if data == "" {
 		return nil
 	}

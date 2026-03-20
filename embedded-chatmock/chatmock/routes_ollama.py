@@ -8,13 +8,16 @@ from typing import Any, Dict, List
 from flask import Blueprint, Response, current_app, jsonify, make_response, request, stream_with_context
 
 from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS
+from .context_compaction import maybe_compact_input_items
 from .limits import record_rate_limits_from_response
 from .http import build_cors_headers
+from .responses_session import is_previous_response_not_found, resolve_turn_state, save_response_session
 from .reasoning import (
     allowed_efforts_for_model,
     build_reasoning_param,
     extract_reasoning_from_model_name,
     extract_service_tier_from_model_name,
+    normalize_reasoning_compat,
     parse_fast_mode,
     public_model_name,
     presented_service_tier_name,
@@ -118,12 +121,6 @@ def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_t
 
 
 def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None = None) -> str | None:
-    request_value = payload.get("service_tier")
-    if isinstance(request_value, str):
-        normalized = request_value.strip().lower()
-        if normalized in ("", "off", "none", "unset"):
-            return None
-        return normalized
     fast_mode = parse_fast_mode(payload.get("fast_mode"))
     if fast_mode is True:
         return "fast"
@@ -359,14 +356,29 @@ def ollama_chat() -> Response:
         return jsonify(err), 400
 
     input_items = convert_chat_messages_to_responses_input(messages)
+    normalized_model = normalize_model_name(model)
+    compaction_instructions = _resolve_bridge_instructions(normalized_model, payload)
+    input_items, compaction_instructions, _ = maybe_compact_input_items(
+        payload,
+        input_items,
+        compaction_instructions,
+    )
     thread_session = resolve_thread_session_state(
         payload=payload,
         input_items=input_items,
         headers=request.headers,
     )
+    full_input_items = list(input_items)
+    effective_input_items, effective_previous_response_id = resolve_turn_state(
+        payload,
+        full_input_items,
+        thread_session,
+    )
+    extra_payload = {}
+    if effective_previous_response_id:
+        extra_payload["previous_response_id"] = effective_previous_response_id
 
     model_reasoning = extract_reasoning_from_model_name(model)
-    normalized_model = normalize_model_name(model)
     service_tier = _resolve_service_tier(payload, model)
     attempt_limit = _upstream_attempt_limit(stream_req, normalized_model, service_tier)
     last_error_info: Dict[str, Any] | None = None
@@ -374,8 +386,8 @@ def ollama_chat() -> Response:
     for attempt_index in range(attempt_limit):
         upstream, error_resp = start_upstream_request(
             normalized_model,
-            input_items,
-            instructions=_resolve_bridge_instructions(normalized_model, payload),
+            effective_input_items,
+            instructions=compaction_instructions,
             tools=tools_responses,
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
@@ -387,6 +399,7 @@ def ollama_chat() -> Response:
             ),
             service_tier=service_tier,
             thread_session=thread_session,
+            extra_payload=extra_payload,
         )
         if error_resp is not None:
             error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
@@ -407,8 +420,8 @@ def ollama_chat() -> Response:
                 safe_choice = payload.get("tool_choice", "auto")
                 upstream2, err2 = start_upstream_request(
                     normalize_model_name(model),
-                    input_items,
-                    instructions=_resolve_bridge_instructions(normalized_model, payload),
+                    effective_input_items,
+                    instructions=compaction_instructions,
                     tools=base_tools_only,
                     tool_choice=safe_choice,
                     parallel_tool_calls=parallel_tool_calls,
@@ -420,6 +433,7 @@ def ollama_chat() -> Response:
                     ),
                     service_tier=service_tier,
                     thread_session=thread_session,
+                    extra_payload=extra_payload,
                 )
                 record_rate_limits_from_response(upstream2)
                 if err2 is None and upstream2 is not None and upstream2.status_code < 400:
@@ -456,7 +470,7 @@ def ollama_chat() -> Response:
 
     if stream_req:
         def _gen(current_upstream):
-            compat = (current_app.config.get("REASONING_COMPAT", "current") or "current").strip().lower()
+            compat = normalize_reasoning_compat(current_app.config.get("REASONING_COMPAT", "current"))
             think_open = False
             think_closed = False
             saw_any_summary = False
@@ -465,6 +479,7 @@ def ollama_chat() -> Response:
             tool_calls_stream: List[Dict[str, Any]] = []
             done_reason = "stop"
             has_visible_output = False
+            completed_response_obj = None
             try:
                 for raw_line in current_upstream.iter_lines(decode_unicode=False):
                     if not raw_line:
@@ -627,11 +642,22 @@ def ollama_chat() -> Response:
                             "stream",
                             evt.get("response"),
                         )
-                        if not has_visible_output and should_retry_next_candidate(error_info):
+                        if not has_visible_output and (
+                            should_retry_next_candidate(error_info) or is_previous_response_not_found(error_info)
+                        ):
                             raise RetryableStreamError(error_info)
                         yield json.dumps({"error": normalized_error_payload(error_info)}) + "\n"
                         return
                     elif kind == "response.completed":
+                        response_obj = evt.get("response")
+                        if isinstance(response_obj, dict):
+                            completed_response_obj = response_obj
+                            save_response_session(
+                                thread_session,
+                                response_obj=response_obj,
+                                full_input_items=full_input_items,
+                                upstream=current_upstream,
+                            )
                         break
             finally:
                 current_upstream.close()
@@ -667,19 +693,51 @@ def ollama_chat() -> Response:
         def _retrying_stream():
             current_upstream = upstream
             remaining_attempts = max(1, attempt_limit)
+            recovered_previous_response = False
             while remaining_attempts > 0:
                 try:
                     yield from _gen(current_upstream)
                     return
                 except RetryableStreamError as exc:
+                    if (
+                        effective_previous_response_id
+                        and not recovered_previous_response
+                        and is_previous_response_not_found(exc.error_info)
+                    ):
+                        retry_extra_payload = dict(extra_payload)
+                        retry_extra_payload.pop("previous_response_id", None)
+                        next_upstream, next_error = start_upstream_request(
+                            normalized_model,
+                            full_input_items,
+                            instructions=compaction_instructions,
+                            tools=tools_responses,
+                            tool_choice=tool_choice,
+                            parallel_tool_calls=parallel_tool_calls,
+                            reasoning_param=build_reasoning_param(
+                                reasoning_effort,
+                                reasoning_summary,
+                                model_reasoning,
+                                allowed_efforts=allowed_efforts_for_model(model),
+                            ),
+                            service_tier=service_tier,
+                            thread_session=thread_session,
+                            extra_payload=retry_extra_payload,
+                        )
+                        if next_error is not None:
+                            next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
+                            yield json.dumps({"error": normalized_error_payload(next_error_info)}) + "\n"
+                            return
+                        current_upstream = next_upstream
+                        recovered_previous_response = True
+                        continue
                     remaining_attempts -= 1
                     if remaining_attempts <= 0:
                         yield json.dumps({"error": normalized_error_payload(exc.error_info)}) + "\n"
                         return
                     next_upstream, next_error = start_upstream_request(
                         normalized_model,
-                        input_items,
-                        instructions=_resolve_bridge_instructions(normalized_model, payload),
+                        effective_input_items,
+                        instructions=compaction_instructions,
                         tools=tools_responses,
                         tool_choice=tool_choice,
                         parallel_tool_calls=parallel_tool_calls,
@@ -691,6 +749,7 @@ def ollama_chat() -> Response:
                         ),
                         service_tier=service_tier,
                         thread_session=thread_session,
+                        extra_payload=extra_payload,
                     )
                     if next_error is not None:
                         next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
@@ -709,6 +768,7 @@ def ollama_chat() -> Response:
             resp.headers.setdefault(k, v)
         return resp
 
+    completed_upstream = upstream
     full_text = ""
     reasoning_summary_text = ""
     reasoning_full_text = ""
@@ -769,6 +829,14 @@ def ollama_chat() -> Response:
                 )
                 error_message = error_info.get("raw_message") or "response.failed"
             elif kind == "response.completed":
+                response_obj = evt.get("response")
+                if isinstance(response_obj, dict):
+                    save_response_session(
+                        thread_session,
+                        response_obj=response_obj,
+                        full_input_items=full_input_items,
+                        upstream=upstream,
+                    )
                 completed_ok = True
                 break
     finally:
@@ -788,9 +856,114 @@ def ollama_chat() -> Response:
                 raw_message=error_message,
                 raw_body={"message": error_message},
             )
+        if effective_previous_response_id and is_previous_response_not_found(error_info):
+            retry_extra_payload = dict(extra_payload)
+            retry_extra_payload.pop("previous_response_id", None)
+            retry_upstream, retry_error = start_upstream_request(
+                normalized_model,
+                full_input_items,
+                instructions=compaction_instructions,
+                tools=tools_responses,
+                tool_choice=tool_choice,
+                parallel_tool_calls=parallel_tool_calls,
+                reasoning_param=build_reasoning_param(
+                    reasoning_effort,
+                    reasoning_summary,
+                    model_reasoning,
+                    allowed_efforts=allowed_efforts_for_model(model),
+                ),
+                service_tier=service_tier,
+                thread_session=thread_session,
+                extra_payload=retry_extra_payload,
+            )
+            if retry_error is None and retry_upstream is not None and retry_upstream.status_code < 400:
+                completed_upstream = retry_upstream
+                full_text = ""
+                reasoning_summary_text = ""
+                reasoning_full_text = ""
+                tool_calls = []
+                observed_service_tier = None
+                completed_ok = False
+                error_message = None
+                error_info = None
+                try:
+                    for raw in retry_upstream.iter_lines(decode_unicode=False):
+                        if not raw:
+                            continue
+                        line = raw.decode("utf-8", errors="ignore") if isinstance(raw, (bytes, bytearray)) else raw
+                        if not line.startswith("data: "):
+                            continue
+                        data = line[len("data: "):].strip()
+                        if not data:
+                            continue
+                        if data == "[DONE]":
+                            break
+                        try:
+                            evt = json.loads(data)
+                        except Exception:
+                            continue
+                        if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("service_tier"), str):
+                            observed_service_tier = evt["response"].get("service_tier") or observed_service_tier
+                        kind = evt.get("type")
+                        if kind == "response.output_text.delta":
+                            full_text += evt.get("delta") or ""
+                        elif kind == "response.reasoning_summary_text.delta":
+                            reasoning_summary_text += evt.get("delta") or ""
+                        elif kind == "response.reasoning_text.delta":
+                            reasoning_full_text += evt.get("delta") or ""
+                        elif kind == "response.output_item.done":
+                            item = evt.get("item") or {}
+                            if isinstance(item, dict) and item.get("type") == "function_call":
+                                call_id = item.get("call_id") or item.get("id") or ""
+                                name = item.get("name") or ""
+                                args = item.get("arguments") or ""
+                                if not isinstance(args, str):
+                                    try:
+                                        args = json.dumps(args, ensure_ascii=False)
+                                    except Exception:
+                                        args = "{}"
+                                if isinstance(call_id, str) and isinstance(name, str) and isinstance(args, str):
+                                    tool_calls.append(
+                                        {
+                                            "id": call_id,
+                                            "type": "function",
+                                            "function": {"name": name, "arguments": args},
+                                        }
+                                    )
+                        elif kind == "response.completed":
+                            response_obj = evt.get("response")
+                            if isinstance(response_obj, dict):
+                                save_response_session(
+                                    thread_session,
+                                    response_obj=response_obj,
+                                    full_input_items=full_input_items,
+                                    upstream=retry_upstream,
+                                )
+                            completed_ok = True
+                            break
+                finally:
+                    if completed_ok and hasattr(retry_upstream, "mark_success"):
+                        try:
+                            retry_upstream.mark_success()
+                        except Exception:
+                            pass
+                    retry_upstream.close()
+                if completed_ok:
+                    error_message = None
+                    error_info = None
+                else:
+                    return build_ollama_error_response(
+                        build_error_info(
+                            source=getattr(retry_upstream, "chatmock_source", "upstream"),
+                            phase="stream",
+                            raw_status=int(getattr(retry_upstream, "status_code", 502) or 502),
+                            raw_message="stream ended before response.completed",
+                            raw_body={"message": "stream ended before response.completed"},
+                        )
+                    )
         return build_ollama_error_response(error_info)
 
-    if (current_app.config.get("REASONING_COMPAT", "current") or "current").strip().lower() == "think-tags":
+    if normalize_reasoning_compat(current_app.config.get("REASONING_COMPAT", "current")) == "think-tags":
         rtxt_parts = []
         if isinstance(reasoning_summary_text, str) and reasoning_summary_text.strip():
             rtxt_parts.append(reasoning_summary_text)
@@ -801,7 +974,7 @@ def ollama_chat() -> Response:
             full_text = f"<think>{rtxt}</think>" + (full_text or "")
 
     out_json = {
-        "model": normalize_model_name(model),
+        "model": model_out,
         "created_at": created_at,
         "message": {
             "role": "assistant",
@@ -811,7 +984,11 @@ def ollama_chat() -> Response:
         "done": True,
         "done_reason": "tool_calls" if tool_calls else "stop",
     }
-    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
+    presented_service_tier = (
+        presented_service_tier_name(service_tier, observed_service_tier)
+        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
+        else None
+    )
     if presented_service_tier:
         out_json["service_tier"] = presented_service_tier
     out_json.update(_OLLAMA_FAKE_EVAL)

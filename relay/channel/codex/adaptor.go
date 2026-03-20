@@ -90,6 +90,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 			}
 		}
 	}
+	if err := maybeCompactResponsesRequest(&request); err != nil {
+		return nil, err
+	}
 	// Codex backend requires the `instructions` field to be present.
 	// Keep it consistent with Codex CLI behavior by defaulting to an empty string.
 	if len(request.Instructions) == 0 {

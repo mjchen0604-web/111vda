@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, current_app, jsonify, make_response, request, send_from_directory
 
+from .reasoning import normalize_reasoning_compat
 from .utils import (
     get_chatgpt_auth_records,
     get_chatgpt_runtime_candidate_records,
@@ -26,7 +27,7 @@ _DASHBOARD_DIR = Path(__file__).resolve().parent / "dashboard"
 _VALID_ROUTING_STRATEGIES = {"round-robin", "random", "first"}
 _VALID_REASONING_EFFORT = {"minimal", "low", "medium", "high", "xhigh"}
 _VALID_REASONING_SUMMARY = {"auto", "concise", "detailed", "none"}
-_VALID_REASONING_COMPAT = {"legacy", "o3", "think-tags", "current"}
+_VALID_REASONING_COMPAT = {"legacy", "o3", "current"}
 _DEFAULT_REASONING_COMPAT = "current"
 
 
@@ -243,7 +244,9 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
     if runtime_app is not None:
         reasoning_effort = str(runtime_app.config.get("REASONING_EFFORT", "medium"))
         reasoning_summary = str(runtime_app.config.get("REASONING_SUMMARY", "auto"))
-        reasoning_compat = str(runtime_app.config.get("REASONING_COMPAT", _DEFAULT_REASONING_COMPAT))
+        reasoning_compat = normalize_reasoning_compat(
+            runtime_app.config.get("REASONING_COMPAT", _DEFAULT_REASONING_COMPAT)
+        )
         expose_reasoning_models = bool(runtime_app.config.get("EXPOSE_REASONING_MODELS"))
         enable_web_search = False
         verbose = bool(runtime_app.config.get("VERBOSE"))
@@ -251,7 +254,9 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
     else:
         reasoning_effort = os.getenv("CHATGPT_LOCAL_REASONING_EFFORT", "medium")
         reasoning_summary = os.getenv("CHATGPT_LOCAL_REASONING_SUMMARY", "auto")
-        reasoning_compat = os.getenv("CHATGPT_LOCAL_REASONING_COMPAT", _DEFAULT_REASONING_COMPAT)
+        reasoning_compat = normalize_reasoning_compat(
+            os.getenv("CHATGPT_LOCAL_REASONING_COMPAT", _DEFAULT_REASONING_COMPAT)
+        )
         expose_reasoning_models = _bool_env("CHATGPT_LOCAL_EXPOSE_REASONING_MODELS", default=False)
         enable_web_search = False
         verbose = _bool_env("CHATGPT_LOCAL_VERBOSE", default=False)
@@ -271,7 +276,7 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
         "maxRetryInterval": get_max_retry_interval_seconds(),
         "reasoningEffort": _clean_choice(reasoning_effort, _VALID_REASONING_EFFORT, "medium"),
         "reasoningSummary": _clean_choice(reasoning_summary, _VALID_REASONING_SUMMARY, "auto"),
-        "reasoningCompat": _clean_choice(reasoning_compat, _VALID_REASONING_COMPAT, _DEFAULT_REASONING_COMPAT),
+        "reasoningCompat": normalize_reasoning_compat(reasoning_compat),
         "exposeReasoningModels": bool(expose_reasoning_models),
         "enableWebSearch": bool(enable_web_search),
         "verbose": bool(verbose),
@@ -322,10 +327,8 @@ def _merge_payload_settings(payload: Dict[str, Any], current: Dict[str, Any]) ->
             _VALID_REASONING_SUMMARY,
             current["reasoningSummary"],
         ),
-        "reasoningCompat": _clean_choice(
-            incoming.get("reasoningCompat", current["reasoningCompat"]),
-            _VALID_REASONING_COMPAT,
-            current["reasoningCompat"],
+        "reasoningCompat": normalize_reasoning_compat(
+            incoming.get("reasoningCompat", current["reasoningCompat"])
         ),
         "exposeReasoningModels": _bool_value(
             incoming.get("exposeReasoningModels", current["exposeReasoningModels"]),

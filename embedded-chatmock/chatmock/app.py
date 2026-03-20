@@ -9,6 +9,7 @@ from .config import (
     GPT5_CODEX_INSTRUCTIONS,
 )
 from .http import build_cors_headers
+from .reasoning import normalize_reasoning_compat
 from .routes_anthropic import anthropic_bp
 from .routes_dashboard import apply_persisted_dashboard_settings, dashboard_bp
 from .routes_openai import openai_bp
@@ -27,6 +28,9 @@ def create_app(
     service_tier: str | None = None,
 ) -> Flask:
     app = Flask(__name__)
+    client_metadata_minimization = (
+        os.getenv("CHATMOCK_CLIENT_METADATA_MINIMIZATION") or "1"
+    ).strip().lower() in ("1", "true", "yes", "on")
     expose_service_tier = (
         os.getenv("CHATMOCK_EXPOSE_SERVICE_TIER") or "0"
     ).strip().lower() in ("1", "true", "yes", "on")
@@ -38,13 +42,14 @@ def create_app(
     )
     if normalized_service_tier in ("off", "none", "unset"):
         normalized_service_tier = None
+    normalized_reasoning_compat = normalize_reasoning_compat(reasoning_compat)
 
     app.config.update(
         VERBOSE=bool(verbose),
         VERBOSE_OBFUSCATION=bool(verbose_obfuscation),
         REASONING_EFFORT=reasoning_effort,
         REASONING_SUMMARY=reasoning_summary,
-        REASONING_COMPAT=reasoning_compat,
+        REASONING_COMPAT=normalized_reasoning_compat,
         DEBUG_MODEL=debug_model,
         BASE_INSTRUCTIONS=BASE_INSTRUCTIONS,
         GPT5_CODEX_INSTRUCTIONS=GPT5_CODEX_INSTRUCTIONS,
@@ -53,6 +58,7 @@ def create_app(
         SERVICE_TIER=normalized_service_tier,
         EXPOSE_SERVICE_TIER=bool(expose_service_tier),
         EXPOSE_THREAD_IDS=bool(expose_thread_ids),
+        CLIENT_METADATA_MINIMIZATION=bool(client_metadata_minimization),
     )
     apply_persisted_dashboard_settings(app)
 

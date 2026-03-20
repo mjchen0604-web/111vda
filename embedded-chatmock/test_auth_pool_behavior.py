@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
 
 CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
@@ -13,8 +14,10 @@ sys.path.insert(0, str(CHATMOCK_ROOT))
 from chatmock.utils import (
     ManagedAuthUpstream,
     _clear_invalid_auth_candidate,
+    _candidate_codex_pressure_score,
     _dedupe_candidates_by_account_id,
     _remove_label_state,
+    _preferred_chatgpt_auth_candidate_for_hint,
     _state_for_label,
     _parse_auth_files_env,
     _preferred_chatgpt_auth_candidate_for_session,
@@ -26,12 +29,20 @@ from chatmock.utils import (
     mark_chatgpt_auth_result,
     probe_chatgpt_auth_candidates_and_quarantine_invalid,
     remove_chatgpt_auth_candidate,
+    update_chatgpt_candidate_rate_limits,
+)
+from chatmock.connection_slots import (
+    acquire_chatgpt_connection_slot,
+    clear_chatgpt_connection_slots,
+    get_chatgpt_connection_slot_state,
+    release_chatgpt_connection_slot,
 )
 
 
 class AuthPoolBehaviorTests(unittest.TestCase):
     def tearDown(self):
         clear_chatgpt_auth_session_binding("sess-sticky")
+        clear_chatgpt_connection_slots()
         for label in ("acc01/auth.json", "acc02/auth.json"):
             _remove_label_state(label)
             _clear_invalid_auth_candidate(label=label)
@@ -107,6 +118,48 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         self.assertIsNotNone(binding)
         self.assertEqual(binding["label"], "acc01/auth.json")
 
+    def test_connection_slot_reused_for_same_session_and_candidate(self):
+        candidate = {
+            "label": "acc01/auth.json",
+            "account_id": "acc01",
+            "source_path": "/tmp/accounts/acc01/auth.json",
+        }
+        slot1, session1 = acquire_chatgpt_connection_slot(candidate, "sess-sticky")
+        release_chatgpt_connection_slot(slot1)
+        slot2, session2 = acquire_chatgpt_connection_slot(candidate, "sess-sticky")
+        release_chatgpt_connection_slot(slot2)
+        self.assertEqual(slot1, slot2)
+        self.assertIs(session1, session2)
+        self.assertIsInstance(session1, requests.Session)
+
+    def test_connection_slot_separates_different_sessions(self):
+        candidate = {
+            "label": "acc01/auth.json",
+            "account_id": "acc01",
+            "source_path": "/tmp/accounts/acc01/auth.json",
+        }
+        slot1, _ = acquire_chatgpt_connection_slot(candidate, "sess-one")
+        release_chatgpt_connection_slot(slot1)
+        slot2, _ = acquire_chatgpt_connection_slot(candidate, "sess-two")
+        release_chatgpt_connection_slot(slot2)
+        state = get_chatgpt_connection_slot_state()
+        self.assertNotEqual(slot1, slot2)
+        self.assertIn(slot1, state)
+        self.assertIn(slot2, state)
+
+    def test_thread_hint_prefers_matching_candidate(self):
+        candidates = [
+            {"label": "acc01/auth.json", "account_id": "same-account", "source_path": "/tmp/accounts/acc01/auth.json"},
+            {"label": "acc02/auth.json", "account_id": "same-account", "source_path": "/tmp/accounts/acc02/auth.json"},
+        ]
+        preferred = _preferred_chatgpt_auth_candidate_for_hint(
+            candidates,
+            "acc02/auth.json",
+            None,
+        )
+        self.assertIsNotNone(preferred)
+        self.assertEqual(preferred["label"], "acc02/auth.json")
+
     def test_rate_limited_candidate_only_cools_down_current_credential(self):
         candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}
         candidate2 = {"label": "acc02/auth.json", "account_id": "same-account"}
@@ -118,6 +171,39 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         handle_chatgpt_candidate_failure(candidate1, info)
         self.assertTrue(is_auth_candidate_blocked(candidate1))
         self.assertFalse(is_auth_candidate_blocked(candidate2))
+
+    def test_codex_limit_headers_block_only_exhausted_candidate(self):
+        candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}
+        candidate2 = {"label": "acc02/auth.json", "account_id": "same-account"}
+        update_chatgpt_candidate_rate_limits(
+            "acc01/auth.json",
+            primary_used_percent=100.0,
+            primary_window_minutes=10080,
+            primary_resets_in_seconds=3600,
+        )
+        update_chatgpt_candidate_rate_limits(
+            "acc02/auth.json",
+            primary_used_percent=20.0,
+            primary_window_minutes=10080,
+            primary_resets_in_seconds=3600,
+        )
+        self.assertTrue(is_auth_candidate_blocked(candidate1))
+        self.assertFalse(is_auth_candidate_blocked(candidate2))
+
+    def test_codex_pressure_score_prefers_lower_usage_candidate(self):
+        candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}
+        candidate2 = {"label": "acc02/auth.json", "account_id": "same-account"}
+        update_chatgpt_candidate_rate_limits(
+            "acc01/auth.json",
+            primary_used_percent=92.0,
+            secondary_used_percent=88.0,
+        )
+        update_chatgpt_candidate_rate_limits(
+            "acc02/auth.json",
+            primary_used_percent=10.0,
+            secondary_used_percent=15.0,
+        )
+        self.assertGreater(_candidate_codex_pressure_score(candidate1), _candidate_codex_pressure_score(candidate2))
 
     def test_remove_candidate_only_removes_targeted_auth_file(self):
         original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")

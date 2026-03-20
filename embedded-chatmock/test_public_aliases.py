@@ -7,6 +7,7 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.reasoning import (
+    normalize_reasoning_compat,
     presented_service_tier_name,
     public_model_name,
     public_service_tier_name,
@@ -33,6 +34,10 @@ class PublicAliasTests(unittest.TestCase):
     def test_presented_service_tier_prefers_requested_priority(self):
         self.assertEqual(presented_service_tier_name("priority", "default"), "priority")
         self.assertEqual(presented_service_tier_name("fast", "default"), "priority")
+
+    def test_reasoning_compat_think_tags_falls_back_to_current(self):
+        self.assertEqual(normalize_reasoning_compat("think-tags"), "current")
+        self.assertEqual(normalize_reasoning_compat("current"), "current")
 
     def test_public_model_name_rewrites_fast_suffix(self):
         self.assertEqual(

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any, Dict, List
 
-from flask import Blueprint, Response, current_app, jsonify, make_response, request
+from flask import Blueprint, Response, current_app, has_app_context, jsonify, make_response, request
 
 from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS
+from .context_compaction import build_compaction_summary, maybe_compact_input_items
 from .limits import record_rate_limits_from_response
 from .http import build_cors_headers
+from .responses_session import is_previous_response_not_found, resolve_turn_state, save_response_session
 from .reasoning import (
     allowed_efforts_for_model,
     apply_reasoning_to_message,
@@ -32,6 +35,11 @@ from .upstream_errors import (
 )
 from .upstream import normalize_model_name, start_upstream_request
 from .thread_sessions import resolve_thread_session_state
+from .usage_passthrough import (
+    extract_responses_usage_from_event,
+    to_chat_usage,
+    to_responses_usage,
+)
 from .utils import (
     RetryableStreamError,
     convert_chat_messages_to_responses_input,
@@ -149,12 +157,6 @@ def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_t
 
 
 def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None = None) -> str | None:
-    request_value = payload.get("service_tier")
-    if isinstance(request_value, str):
-        normalized = request_value.strip().lower()
-        if normalized in ("", "off", "none", "unset"):
-            return None
-        return normalized
     fast_mode = parse_fast_mode(payload.get("fast_mode"))
     if fast_mode is True:
         return "fast"
@@ -177,6 +179,35 @@ def _resolve_thread_session(payload: Dict[str, Any], input_items: List[Dict[str,
         payload=payload,
         input_items=input_items,
         headers=request.headers,
+    )
+
+
+def _prepare_route_turn_state(
+    payload: Dict[str, Any],
+    input_items: List[Dict[str, Any]],
+    instructions: str | None,
+    *,
+    thread_session: Dict[str, Any] | None,
+) -> tuple[List[Dict[str, Any]], str | None, Dict[str, Any] | None, List[Dict[str, Any]], List[Dict[str, Any]], str | None, Dict[str, Any]]:
+    next_input_items, next_instructions, compaction_meta = maybe_compact_input_items(
+        payload,
+        input_items,
+        instructions,
+    )
+    full_input_items = list(next_input_items)
+    effective_input_items, effective_previous_response_id = resolve_turn_state(
+        payload,
+        full_input_items,
+        thread_session,
+    )
+    return (
+        next_input_items,
+        next_instructions,
+        thread_session,
+        full_input_items,
+        effective_input_items,
+        effective_previous_response_id,
+        compaction_meta,
     )
 
 
@@ -235,6 +266,397 @@ def _should_retry_nonstream_candidate(error_info: Dict[str, Any] | None) -> bool
     return should_retry_next_candidate(error_info)
 
 
+def _normalize_responses_input(payload: Dict[str, Any]) -> tuple[List[Dict[str, Any]] | None, str | None]:
+    raw_input = payload.get("input")
+    if isinstance(raw_input, str):
+        return [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": raw_input}],
+            }
+        ], None
+    if not isinstance(raw_input, list) or not raw_input:
+        return None, "input must be a non-empty string or array"
+
+    normalized: List[Dict[str, Any]] = []
+    for idx, item in enumerate(raw_input):
+        if not isinstance(item, dict):
+            return None, f"input[{idx}] must be an object"
+        item_copy = dict(item)
+        if item_copy.get("type") == "function_call" and isinstance(item_copy.get("name"), str):
+            item_copy["name"] = sanitize_reserved_tool_name(item_copy.get("name"))
+        normalized.append(item_copy)
+    return normalized, None
+
+
+def _normalize_responses_tools(tools_payload: Any) -> tuple[List[Dict[str, Any]] | None, str | None]:
+    if tools_payload is None:
+        return [], None
+    if not isinstance(tools_payload, list):
+        return None, "tools must be an array"
+
+    normalized: List[Dict[str, Any]] = []
+    for idx, tool in enumerate(tools_payload):
+        if not isinstance(tool, dict):
+            return None, f"tools[{idx}] must be an object"
+        tool_copy = dict(tool)
+        if tool_copy.get("type") == "function" and isinstance(tool_copy.get("name"), str):
+            tool_copy["name"] = sanitize_reserved_tool_name(tool_copy.get("name"))
+        normalized.append(tool_copy)
+    return normalized, None
+
+
+def _normalize_responses_tool_choice(choice_payload: Any) -> Any:
+    if not isinstance(choice_payload, dict):
+        return choice_payload
+    choice = dict(choice_payload)
+    function_block = choice.get("function")
+    if isinstance(function_block, dict) and isinstance(function_block.get("name"), str):
+        choice["function"] = {
+            **function_block,
+            "name": sanitize_reserved_tool_name(function_block.get("name")),
+        }
+    elif isinstance(choice.get("name"), str):
+        choice["name"] = sanitize_reserved_tool_name(choice.get("name"))
+    return choice
+
+
+def _resolve_responses_instructions(model: str, payload: Dict[str, Any]) -> str | None:
+    instructions = payload.get("instructions")
+    if isinstance(instructions, str):
+        return instructions
+    return _resolve_bridge_instructions(model, payload)
+
+
+def _build_responses_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    passthrough_keys = (
+        "previous_response_id",
+        "include",
+        "metadata",
+        "truncation",
+        "text",
+        "user",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "conversation",
+        "store",
+        "temperature",
+        "top_p",
+        "max_tool_calls",
+        "prompt",
+    )
+    extra: Dict[str, Any] = {}
+    for key in passthrough_keys:
+        if key in payload and payload.get(key) is not None:
+            extra[key] = payload.get(key)
+    return extra
+
+
+def _presented_client_model(requested_model: str | None, observed_model: str | None) -> str | None:
+    if isinstance(requested_model, str) and requested_model.strip():
+        return requested_model
+    if isinstance(observed_model, str) and observed_model.strip():
+        return observed_model
+    return observed_model
+
+
+def _build_minimal_responses_payload(
+    *,
+    response_id: str,
+    model: str,
+    created_at: int,
+    output_text: str,
+    usage_obj: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    message_id = f"msg_{response_id}"
+    return {
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "status": "completed",
+        "model": model,
+        "output": [
+            {
+                "type": "message",
+                "id": message_id,
+                "status": "completed",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": output_text,
+                        "annotations": [],
+                    }
+                ],
+            }
+        ],
+        "usage": usage_obj or {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+    }
+
+
+def _client_metadata_minimization_enabled() -> bool:
+    if has_app_context():
+        return bool(current_app.config.get("CLIENT_METADATA_MINIMIZATION", True))
+    return (os.getenv("CHATMOCK_CLIENT_METADATA_MINIMIZATION") or "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _service_tier_exposure_enabled() -> bool:
+    if has_app_context():
+        return bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
+    return (os.getenv("CHATMOCK_EXPOSE_SERVICE_TIER") or "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _presented_client_service_tier(
+    requested_service_tier: str | None,
+    observed_service_tier: str | None,
+) -> str | None:
+    if not _service_tier_exposure_enabled():
+        return None
+    presented = presented_service_tier_name(requested_service_tier, observed_service_tier)
+    if presented == "priority":
+        return "priority"
+    return None
+
+
+def _strip_client_visible_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, item in value.items():
+            if key in ("system_fingerprint", "fingerprint", "service_tier"):
+                continue
+            cleaned[key] = _strip_client_visible_metadata(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_strip_client_visible_metadata(item) for item in value]
+    return value
+
+
+def _sanitize_responses_response_obj(
+    response_obj: Dict[str, Any],
+    *,
+    requested_model: str | None,
+    requested_service_tier: str | None,
+    observed_service_tier: str | None = None,
+) -> Dict[str, Any]:
+    if not _client_metadata_minimization_enabled():
+        return response_obj
+    cleaned = _strip_client_visible_metadata(response_obj)
+    if not isinstance(cleaned, dict):
+        return response_obj
+    presented_model = _presented_client_model(requested_model, cleaned.get("model"))
+    if presented_model:
+        cleaned["model"] = presented_model
+    presented_service_tier = _presented_client_service_tier(
+        requested_service_tier,
+        observed_service_tier,
+    )
+    if presented_service_tier:
+        cleaned["service_tier"] = presented_service_tier
+    return cleaned
+
+
+def _sanitize_responses_stream_event(
+    evt: Dict[str, Any],
+    *,
+    requested_model: str | None,
+    requested_service_tier: str | None,
+    metadata_minimization_enabled: bool,
+) -> Dict[str, Any]:
+    if not metadata_minimization_enabled:
+        return evt
+    observed_service_tier = None
+    response_obj = evt.get("response")
+    if isinstance(response_obj, dict) and isinstance(response_obj.get("service_tier"), str):
+        observed_service_tier = response_obj.get("service_tier") or None
+    cleaned = _strip_client_visible_metadata(evt)
+    if isinstance(cleaned, dict) and isinstance(cleaned.get("response"), dict):
+        presented_model = _presented_client_model(
+            requested_model,
+            cleaned["response"].get("model"),
+        )
+        if presented_model:
+            cleaned["response"]["model"] = presented_model
+        presented_service_tier = _presented_client_service_tier(
+            requested_service_tier,
+            observed_service_tier,
+        )
+        if presented_service_tier:
+            cleaned["response"]["service_tier"] = presented_service_tier
+    return cleaned
+
+
+def _consume_responses_nonstream(
+    upstream: Any,
+    *,
+    requested_model: str | None,
+    model: str,
+    created: int,
+) -> Dict[str, Any]:
+    response_obj: Dict[str, Any] | None = None
+    response_id = "resp"
+    usage_obj: Dict[str, Any] | None = None
+    observed_service_tier: str | None = None
+    full_text = ""
+    error_info: Dict[str, Any] | None = None
+
+    try:
+        for raw in upstream.iter_lines(decode_unicode=False):
+            if not raw:
+                continue
+            line = raw.decode("utf-8", errors="ignore") if isinstance(raw, (bytes, bytearray)) else raw
+            if not line.startswith("data: "):
+                continue
+            data = line[len("data: "):].strip()
+            if not data or data == "[DONE]":
+                continue
+            try:
+                evt = json.loads(data)
+            except Exception:
+                continue
+            kind = evt.get("type")
+            mu = extract_responses_usage_from_event(evt)
+            if mu:
+                usage_obj = to_responses_usage(mu)
+            if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("id"), str):
+                response_id = evt["response"].get("id") or response_id
+            if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("service_tier"), str):
+                observed_service_tier = evt["response"].get("service_tier") or observed_service_tier
+            if kind == "response.output_text.delta":
+                full_text += evt.get("delta") or ""
+            elif kind == "response.output_text.done":
+                full_text, _ = merge_response_text(full_text, evt.get("text") or "")
+            elif kind == "response.content_part.done":
+                part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
+                full_text, _ = merge_response_text(full_text, part.get("text") or "")
+            elif kind == "response.output_item.done":
+                item = evt.get("item") or {}
+                full_text, _ = merge_response_text(full_text, extract_response_output_text(item))
+            elif kind == "response.failed":
+                error_info = error_info_from_event_response(
+                    getattr(upstream, "chatmock_source", "upstream"),
+                    "stream",
+                    evt.get("response"),
+                )
+                break
+            elif kind == "response.completed":
+                candidate = evt.get("response")
+                if isinstance(candidate, dict):
+                    response_obj = candidate
+                break
+    finally:
+        upstream.close()
+
+    if error_info is not None:
+        return {"ok": False, "error_info": error_info}
+    if response_obj is None:
+        response_obj = _build_minimal_responses_payload(
+            response_id=response_id,
+            model=requested_model or model,
+            created_at=created,
+            output_text=full_text,
+            usage_obj=usage_obj,
+        )
+    return {
+        "ok": True,
+        "response": response_obj,
+        "observed_service_tier": observed_service_tier,
+    }
+
+
+def _responses_stream_passthrough(
+    upstream: Any,
+    *,
+    requested_model: str | None,
+    requested_service_tier: str | None,
+    metadata_minimization_enabled: bool,
+    retry_factory=None,
+    on_completed=None,
+):
+    current_upstream = upstream
+    retried = False
+    while True:
+        should_restart = False
+        had_visible_output = False
+        try:
+            for raw in current_upstream.iter_lines(decode_unicode=False):
+                if not raw:
+                    continue
+                line = raw.decode("utf-8", errors="ignore") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                if not line.startswith("data: "):
+                    yield line.encode("utf-8") + b"\n\n"
+                    continue
+                data = line[len("data: "):].strip()
+                if not data:
+                    continue
+                if data == "[DONE]":
+                    yield b"data: [DONE]\n\n"
+                    continue
+                try:
+                    evt = json.loads(data)
+                except Exception:
+                    yield line.encode("utf-8") + b"\n\n"
+                    continue
+                kind = evt.get("type")
+                if kind in (
+                    "response.output_text.delta",
+                    "response.output_text.done",
+                    "response.content_part.added",
+                    "response.content_part.done",
+                    "response.output_item.added",
+                    "response.output_item.done",
+                    "response.function_call_arguments.delta",
+                    "response.function_call_arguments.done",
+                ):
+                    had_visible_output = True
+                if kind == "response.failed":
+                    error_info = error_info_from_event_response(
+                        getattr(current_upstream, "chatmock_source", "upstream"),
+                        "stream",
+                        evt.get("response"),
+                    )
+                    if (
+                        not retried
+                        and not had_visible_output
+                        and retry_factory is not None
+                        and _is_previous_response_not_found(error_info)
+                    ):
+                        retried = True
+                        should_restart = True
+                        break
+                if kind == "response.completed" and callable(on_completed):
+                    response_obj = evt.get("response")
+                    if isinstance(response_obj, dict):
+                        on_completed(response_obj, current_upstream)
+                sanitized_evt = _sanitize_responses_stream_event(
+                    evt,
+                    requested_model=requested_model,
+                    requested_service_tier=requested_service_tier,
+                    metadata_minimization_enabled=metadata_minimization_enabled,
+                )
+                yield f"data: {json.dumps(sanitized_evt, ensure_ascii=False)}\n\n".encode("utf-8")
+        finally:
+            current_upstream.close()
+        if should_restart:
+            next_upstream = retry_factory()
+            if next_upstream is None:
+                return
+            current_upstream = next_upstream
+            continue
+        return
+
+
 def _consume_chat_completion_nonstream(
     upstream: Any,
     *,
@@ -250,21 +672,9 @@ def _consume_chat_completion_nonstream(
     tool_calls: List[Dict[str, Any]] = []
     error_message: str | None = None
     error_info: Dict[str, Any] | None = None
-    usage_obj: Dict[str, int] | None = None
+    usage_obj: Dict[str, Any] | None = None
     observed_service_tier: str | None = None
     completed_ok = False
-
-    def _extract_usage(evt: Dict[str, Any]) -> Dict[str, int] | None:
-        try:
-            usage = (evt.get("response") or {}).get("usage")
-            if not isinstance(usage, dict):
-                return None
-            pt = int(usage.get("input_tokens") or 0)
-            ct = int(usage.get("output_tokens") or 0)
-            tt = int(usage.get("total_tokens") or (pt + ct))
-            return {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
-        except Exception:
-            return None
 
     try:
         for raw in upstream.iter_lines(decode_unicode=False):
@@ -283,9 +693,9 @@ def _consume_chat_completion_nonstream(
             except Exception:
                 continue
             kind = evt.get("type")
-            mu = _extract_usage(evt)
+            mu = extract_responses_usage_from_event(evt)
             if mu:
-                usage_obj = mu
+                usage_obj = to_chat_usage(mu)
             if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("id"), str):
                 response_id = evt["response"].get("id") or response_id
             if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("service_tier"), str):
@@ -398,23 +808,11 @@ def _consume_text_completion_nonstream(
 ) -> Dict[str, Any]:
     full_text = ""
     response_id = "cmpl"
-    usage_obj: Dict[str, int] | None = None
+    usage_obj: Dict[str, Any] | None = None
     observed_service_tier: str | None = None
     completed_ok = False
     error_message: str | None = None
     error_info: Dict[str, Any] | None = None
-
-    def _extract_usage(evt: Dict[str, Any]) -> Dict[str, int] | None:
-        try:
-            usage = (evt.get("response") or {}).get("usage")
-            if not isinstance(usage, dict):
-                return None
-            pt = int(usage.get("input_tokens") or 0)
-            ct = int(usage.get("output_tokens") or 0)
-            tt = int(usage.get("total_tokens") or (pt + ct))
-            return {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
-        except Exception:
-            return None
 
     try:
         for raw_line in upstream.iter_lines(decode_unicode=False):
@@ -436,9 +834,9 @@ def _consume_text_completion_nonstream(
                 response_id = evt["response"].get("id") or response_id
             if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("service_tier"), str):
                 observed_service_tier = evt["response"].get("service_tier") or observed_service_tier
-            mu = _extract_usage(evt)
+            mu = extract_responses_usage_from_event(evt)
             if mu:
-                usage_obj = mu
+                usage_obj = to_chat_usage(mu)
             kind = evt.get("type")
             if kind == "response.output_text.delta":
                 full_text += evt.get("delta") or ""
@@ -492,6 +890,238 @@ def _consume_text_completion_nonstream(
         "created": created,
         "model": requested_model or model,
     }
+
+
+@openai_bp.route("/v1/responses", methods=["POST"])
+def responses() -> Response:
+    verbose = bool(current_app.config.get("VERBOSE"))
+    reasoning_effort = current_app.config.get("REASONING_EFFORT", "medium")
+    reasoning_summary = current_app.config.get("REASONING_SUMMARY", "auto")
+    raw = request.get_data(cache=True, as_text=True) or ""
+    if verbose:
+        try:
+            print("IN POST /v1/responses\n" + raw)
+        except Exception:
+            pass
+    try:
+        payload = json.loads(raw) if raw else {}
+    except Exception:
+        err = {"error": {"message": "Invalid JSON body"}}
+        if verbose:
+            _log_json("OUT POST /v1/responses", err)
+        return jsonify(err), 400
+
+    requested_model = payload.get("model")
+    model = normalize_model_name(requested_model, current_app.config.get("DEBUG_MODEL"))
+    input_items, input_err = _normalize_responses_input(payload)
+    if input_err:
+        err = {"error": {"message": input_err}}
+        if verbose:
+            _log_json("OUT POST /v1/responses", err)
+        return jsonify(err), 400
+    assert isinstance(input_items, list)
+
+    tools_payload, tools_err = _normalize_responses_tools(payload.get("tools"))
+    if tools_err:
+        err = {"error": {"message": tools_err}}
+        if verbose:
+            _log_json("OUT POST /v1/responses", err)
+        return jsonify(err), 400
+    assert isinstance(tools_payload, list)
+
+    tool_choice = _normalize_responses_tool_choice(payload.get("tool_choice", "auto"))
+    parallel_tool_calls = bool(payload.get("parallel_tool_calls", False))
+    stream_req = bool(payload.get("stream", False))
+    model_reasoning = extract_reasoning_from_model_name(requested_model)
+    service_tier = _resolve_service_tier(payload, requested_model)
+    reasoning_overrides = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else model_reasoning
+    reasoning_param = build_reasoning_param(
+        reasoning_effort,
+        reasoning_summary,
+        reasoning_overrides,
+        allowed_efforts=allowed_efforts_for_model(model),
+    )
+    bridge_instructions = _resolve_responses_instructions(model, payload)
+    thread_session = _resolve_thread_session(payload, input_items)
+    (
+        input_items,
+        bridge_instructions,
+        thread_session,
+        full_input_items,
+        effective_input_items,
+        effective_previous_response_id,
+        _,
+    ) = _prepare_route_turn_state(
+        payload,
+        input_items,
+        bridge_instructions,
+        thread_session=thread_session,
+    )
+    extra_payload = _build_responses_extra_payload(payload)
+    if effective_previous_response_id:
+        extra_payload["previous_response_id"] = effective_previous_response_id
+
+    upstream, error_resp = start_upstream_request(
+        model,
+        effective_input_items,
+        instructions=bridge_instructions,
+        tools=tools_payload,
+        tool_choice=tool_choice,
+        parallel_tool_calls=parallel_tool_calls,
+        reasoning_param=reasoning_param,
+        service_tier=service_tier,
+        thread_session=thread_session,
+        extra_payload=extra_payload,
+    )
+    if error_resp is not None:
+        return error_resp
+
+    record_rate_limits_from_response(upstream)
+    created = int(time.time())
+    if upstream.status_code >= 400:
+        error_info = error_info_from_http_response(getattr(upstream, "chatmock_source", "upstream"), "http", upstream)
+        return build_openai_error_response(error_info)
+
+    if stream_req:
+        metadata_minimization_enabled = _client_metadata_minimization_enabled()
+        def _retry_without_previous_response():
+            retry_extra_payload = dict(extra_payload)
+            retry_extra_payload.pop("previous_response_id", None)
+            retry_upstream, retry_error = start_upstream_request(
+                model,
+                full_input_items,
+                instructions=bridge_instructions,
+                tools=tools_payload,
+                tool_choice=tool_choice,
+                parallel_tool_calls=parallel_tool_calls,
+                reasoning_param=reasoning_param,
+                service_tier=service_tier,
+                thread_session=thread_session,
+                extra_payload=retry_extra_payload,
+            )
+            if retry_error is not None or retry_upstream is None or retry_upstream.status_code >= 400:
+                return None
+            return retry_upstream
+
+        resp = Response(
+            _wrap_stream_logging(
+                "STREAM OUT /v1/responses",
+                _responses_stream_passthrough(
+                    upstream,
+                    requested_model=requested_model,
+                    requested_service_tier=service_tier,
+                    metadata_minimization_enabled=metadata_minimization_enabled,
+                    retry_factory=_retry_without_previous_response if effective_previous_response_id else None,
+                    on_completed=lambda response_obj, completed_upstream: save_response_session(
+                        thread_session,
+                        response_obj=response_obj,
+                        full_input_items=full_input_items,
+                        upstream=completed_upstream,
+                    ),
+                ),
+                verbose,
+            ),
+            status=upstream.status_code,
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+        for k, v in build_cors_headers().items():
+            resp.headers.setdefault(k, v)
+        return resp
+
+    completed_upstream = upstream
+    result = _consume_responses_nonstream(
+        upstream,
+        requested_model=requested_model,
+        model=model,
+        created=created,
+    )
+    if not result.get("ok") and effective_previous_response_id and is_previous_response_not_found(result.get("error_info")):
+        retry_extra_payload = dict(extra_payload)
+        retry_extra_payload.pop("previous_response_id", None)
+        retry_upstream, retry_error = start_upstream_request(
+            model,
+            full_input_items,
+            instructions=bridge_instructions,
+            tools=tools_payload,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            reasoning_param=reasoning_param,
+            service_tier=service_tier,
+            thread_session=thread_session,
+            extra_payload=retry_extra_payload,
+        )
+        if retry_error is None and retry_upstream is not None and retry_upstream.status_code < 400:
+            completed_upstream = retry_upstream
+            result = _consume_responses_nonstream(
+                retry_upstream,
+                requested_model=requested_model,
+                model=model,
+                created=created,
+            )
+    if not result.get("ok"):
+        return build_openai_error_response(result.get("error_info"))
+
+    raw_response_obj = result.get("response") or {}
+    save_response_session(
+        thread_session,
+        response_obj=raw_response_obj,
+        full_input_items=full_input_items,
+        upstream=completed_upstream,
+    )
+    response_obj = _sanitize_responses_response_obj(
+        raw_response_obj,
+        requested_model=requested_model,
+        requested_service_tier=service_tier,
+        observed_service_tier=result.get("observed_service_tier"),
+    )
+    if verbose:
+        _log_json("OUT POST /v1/responses", response_obj)
+    resp = make_response(jsonify(response_obj), 200)
+    for k, v in build_cors_headers().items():
+        resp.headers.setdefault(k, v)
+    return resp
+
+
+@openai_bp.route("/v1/responses/compact", methods=["POST"])
+def responses_compact() -> Response:
+    verbose = bool(current_app.config.get("VERBOSE"))
+    raw = request.get_data(cache=True, as_text=True) or ""
+    if verbose:
+        try:
+            print("IN POST /v1/responses/compact\n" + raw)
+        except Exception:
+            pass
+    try:
+        payload = json.loads(raw) if raw else {}
+    except Exception:
+        err = {"error": {"message": "Invalid JSON body"}}
+        if verbose:
+            _log_json("OUT POST /v1/responses/compact", err)
+        return jsonify(err), 400
+
+    input_items, input_err = _normalize_responses_input(payload)
+    if input_err:
+        err = {"error": {"message": input_err}}
+        if verbose:
+            _log_json("OUT POST /v1/responses/compact", err)
+        return jsonify(err), 400
+    assert isinstance(input_items, list)
+
+    summary_text, _ = build_compaction_summary(payload, input_items)
+    response_obj = {
+        "id": f"comp_{int(time.time() * 1000)}",
+        "object": "response.compaction",
+        "created_at": int(time.time()),
+        "output": [{"type": "summary_text", "text": summary_text or ""}],
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+    }
+    if verbose:
+        _log_json("OUT POST /v1/responses/compact", response_obj)
+    resp = make_response(jsonify(response_obj), 200)
+    for k, v in build_cors_headers().items():
+        resp.headers.setdefault(k, v)
+    return resp
 
 
 @openai_bp.route("/v1/chat/completions", methods=["POST"])
@@ -579,7 +1209,6 @@ def chat_completions() -> Response:
         input_items = [
             {"type": "message", "role": "user", "content": [{"type": "input_text", "text": payload.get("prompt")}]}
         ]
-    thread_session = _resolve_thread_session(payload, input_items)
 
     model_reasoning = extract_reasoning_from_model_name(requested_model)
     reasoning_overrides = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else model_reasoning
@@ -592,6 +1221,24 @@ def chat_completions() -> Response:
         allowed_efforts=allowed_efforts_for_model(model),
     )
     bridge_instructions = _resolve_bridge_instructions(model, payload)
+    thread_session = _resolve_thread_session(payload, input_items)
+    (
+        input_items,
+        bridge_instructions,
+        thread_session,
+        full_input_items,
+        effective_input_items,
+        effective_previous_response_id,
+        compaction_meta,
+    ) = _prepare_route_turn_state(
+        payload,
+        input_items,
+        bridge_instructions,
+        thread_session=thread_session,
+    )
+    extra_payload = {}
+    if effective_previous_response_id:
+        extra_payload["previous_response_id"] = effective_previous_response_id
     selected_mode = "chatgpt-backend"
     _log_fast_probe(
         "start",
@@ -600,6 +1247,7 @@ def chat_completions() -> Response:
         selected_mode=selected_mode,
         requested_service_tier=service_tier,
         is_stream=is_stream,
+        extra={"compaction": compaction_meta} if compaction_meta.get("applied") else None,
     )
 
     attempt_limit = _upstream_attempt_limit(is_stream, model, service_tier)
@@ -610,7 +1258,7 @@ def chat_completions() -> Response:
     for attempt_index in range(attempt_limit):
         upstream, error_resp = start_upstream_request(
             model,
-            input_items,
+            effective_input_items,
             instructions=bridge_instructions,
             tools=tools_responses,
             tool_choice=tool_choice,
@@ -619,6 +1267,7 @@ def chat_completions() -> Response:
             service_tier=service_tier,
             web_search_mode=web_search_mode,
             thread_session=thread_session,
+            extra_payload=extra_payload,
         )
         if error_resp is not None:
             error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
@@ -750,6 +1399,7 @@ def chat_completions() -> Response:
             current_upstream = upstream
             current_created = created
             remaining_attempts = max(1, attempt_limit)
+            recovered_previous_response = False
             while remaining_attempts > 0:
                 try:
                     yield from sse_translate_chat(
@@ -760,9 +1410,45 @@ def chat_completions() -> Response:
                         vlog=print if verbose_obfuscation else None,
                         reasoning_compat=reasoning_compat,
                         include_usage=include_usage,
+                        on_response_completed=lambda response_obj, completed_upstream: save_response_session(
+                            thread_session,
+                            response_obj=response_obj,
+                            full_input_items=full_input_items,
+                            upstream=completed_upstream,
+                        ),
                     )
                     return
                 except RetryableStreamError as exc:
+                    if (
+                        effective_previous_response_id
+                        and not recovered_previous_response
+                        and _is_previous_response_not_found(exc.error_info)
+                    ):
+                        retry_extra_payload = dict(extra_payload)
+                        retry_extra_payload.pop("previous_response_id", None)
+                        next_upstream, next_error = start_upstream_request(
+                            model,
+                            full_input_items,
+                            instructions=bridge_instructions,
+                            tools=tools_responses,
+                            tool_choice=tool_choice,
+                            parallel_tool_calls=parallel_tool_calls,
+                            reasoning_param=reasoning_param,
+                            service_tier=service_tier,
+                            web_search_mode=web_search_mode,
+                            thread_session=thread_session,
+                            extra_payload=retry_extra_payload,
+                        )
+                        if next_error is not None:
+                            next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
+                            payload = {"error": normalized_error_payload(next_error_info)}
+                            yield f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+                            yield b"data: [DONE]\n\n"
+                            return
+                        current_upstream = next_upstream
+                        current_created = int(time.time())
+                        recovered_previous_response = True
+                        continue
                     remaining_attempts -= 1
                     if remaining_attempts <= 0:
                         payload = {"error": normalized_error_payload(exc.error_info)}
@@ -771,8 +1457,8 @@ def chat_completions() -> Response:
                         return
                     next_upstream, next_error = start_upstream_request(
                         model,
-                        input_items,
-                        instructions=_instructions_for_model(model),
+                        effective_input_items,
+                        instructions=bridge_instructions,
                         tools=tools_responses,
                         tool_choice=tool_choice,
                         parallel_tool_calls=parallel_tool_calls,
@@ -780,6 +1466,7 @@ def chat_completions() -> Response:
                         service_tier=service_tier,
                         web_search_mode=web_search_mode,
                         thread_session=thread_session,
+                        extra_payload=extra_payload,
                     )
                     if next_error is not None:
                         next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
@@ -811,6 +1498,38 @@ def chat_completions() -> Response:
             resp.headers.setdefault(k, v)
         return resp
 
+    completed_upstream = upstream
+    if (
+        isinstance(nonstream_result, dict)
+        and not nonstream_result.get("ok")
+        and effective_previous_response_id
+        and _is_previous_response_not_found(nonstream_result.get("error_info"))
+    ):
+        retry_extra_payload = dict(extra_payload)
+        retry_extra_payload.pop("previous_response_id", None)
+        retry_upstream, retry_error = start_upstream_request(
+            model,
+            full_input_items,
+            instructions=bridge_instructions,
+            tools=tools_responses,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            reasoning_param=reasoning_param,
+            service_tier=service_tier,
+            web_search_mode=web_search_mode,
+            thread_session=thread_session,
+            extra_payload=retry_extra_payload,
+        )
+        if retry_error is None and retry_upstream is not None and retry_upstream.status_code < 400:
+            completed_upstream = retry_upstream
+            nonstream_result = _consume_chat_completion_nonstream(
+                retry_upstream,
+                requested_model=requested_model,
+                model=model,
+                created=int(time.time()),
+                reasoning_compat=reasoning_compat,
+            )
+
     if not isinstance(nonstream_result, dict) or not nonstream_result.get("ok"):
         return build_openai_error_response(
             last_error_info
@@ -827,6 +1546,12 @@ def chat_completions() -> Response:
     message = nonstream_result.get("message") or {"role": "assistant", "content": None}
     usage_obj = nonstream_result.get("usage_obj")
     observed_service_tier = nonstream_result.get("observed_service_tier")
+    save_response_session(
+        thread_session,
+        response_id=response_id,
+        full_input_items=full_input_items,
+        upstream=completed_upstream,
+    )
     tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
     completion = {
         "id": response_id or "chatcmpl",
@@ -842,7 +1567,11 @@ def chat_completions() -> Response:
         ],
         **({"usage": usage_obj} if usage_obj else {}),
     }
-    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
+    presented_service_tier = (
+        presented_service_tier_name(service_tier, observed_service_tier)
+        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
+        else None
+    )
     if presented_service_tier:
         completion["service_tier"] = presented_service_tier
     if verbose:
@@ -899,7 +1628,6 @@ def completions() -> Response:
 
     messages = [{"role": "user", "content": prompt or ""}]
     input_items = convert_chat_messages_to_responses_input(messages)
-    thread_session = _resolve_thread_session(payload, input_items)
 
     model_reasoning = extract_reasoning_from_model_name(requested_model)
     reasoning_overrides = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else model_reasoning
@@ -911,6 +1639,24 @@ def completions() -> Response:
         allowed_efforts=allowed_efforts_for_model(model),
     )
     bridge_instructions = _resolve_bridge_instructions(model, payload)
+    thread_session = _resolve_thread_session(payload, input_items)
+    (
+        input_items,
+        bridge_instructions,
+        thread_session,
+        full_input_items,
+        effective_input_items,
+        effective_previous_response_id,
+        _,
+    ) = _prepare_route_turn_state(
+        payload,
+        input_items,
+        bridge_instructions,
+        thread_session=thread_session,
+    )
+    extra_payload = {}
+    if effective_previous_response_id:
+        extra_payload["previous_response_id"] = effective_previous_response_id
     selected_mode = "chatgpt-backend"
     _log_fast_probe(
         "start",
@@ -928,11 +1674,12 @@ def completions() -> Response:
     for attempt_index in range(attempt_limit):
         upstream, error_resp = start_upstream_request(
             model,
-            input_items,
+            effective_input_items,
             instructions=bridge_instructions,
             reasoning_param=reasoning_param,
             service_tier=service_tier,
             thread_session=thread_session,
+            extra_payload=extra_payload,
         )
         if error_resp is not None:
             error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
@@ -1035,6 +1782,7 @@ def completions() -> Response:
             current_upstream = upstream
             current_created = created
             remaining_attempts = max(1, attempt_limit)
+            recovered_previous_response = False
             while remaining_attempts > 0:
                 try:
                     yield from sse_translate_text(
@@ -1044,9 +1792,41 @@ def completions() -> Response:
                         verbose=verbose_obfuscation,
                         vlog=(print if verbose_obfuscation else None),
                         include_usage=include_usage,
+                        on_response_completed=lambda response_obj, completed_upstream: save_response_session(
+                            thread_session,
+                            response_obj=response_obj,
+                            full_input_items=full_input_items,
+                            upstream=completed_upstream,
+                        ),
                     )
                     return
                 except RetryableStreamError as exc:
+                    if (
+                        effective_previous_response_id
+                        and not recovered_previous_response
+                        and _is_previous_response_not_found(exc.error_info)
+                    ):
+                        retry_extra_payload = dict(extra_payload)
+                        retry_extra_payload.pop("previous_response_id", None)
+                        next_upstream, next_error = start_upstream_request(
+                            model,
+                            full_input_items,
+                            instructions=bridge_instructions,
+                            reasoning_param=reasoning_param,
+                            service_tier=service_tier,
+                            thread_session=thread_session,
+                            extra_payload=retry_extra_payload,
+                        )
+                        if next_error is not None:
+                            next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
+                            payload = {"error": normalized_error_payload(next_error_info)}
+                            yield f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+                            yield b"data: [DONE]\n\n"
+                            return
+                        current_upstream = next_upstream
+                        current_created = int(time.time())
+                        recovered_previous_response = True
+                        continue
                     remaining_attempts -= 1
                     if remaining_attempts <= 0:
                         payload = {"error": normalized_error_payload(exc.error_info)}
@@ -1055,11 +1835,12 @@ def completions() -> Response:
                         return
                     next_upstream, next_error = start_upstream_request(
                         model,
-                        input_items,
-                        instructions=_instructions_for_model(model),
+                        effective_input_items,
+                        instructions=bridge_instructions,
                         reasoning_param=reasoning_param,
                         service_tier=service_tier,
                         thread_session=thread_session,
+                        extra_payload=extra_payload,
                     )
                     if next_error is not None:
                         next_error_info = error_info_from_flask_response("chatcore", "request_start", next_error)
@@ -1100,6 +1881,33 @@ def completions() -> Response:
             resp.headers.setdefault(k, v)
         return resp
 
+    completed_upstream = upstream
+    if (
+        isinstance(nonstream_result, dict)
+        and not nonstream_result.get("ok")
+        and effective_previous_response_id
+        and _is_previous_response_not_found(nonstream_result.get("error_info"))
+    ):
+        retry_extra_payload = dict(extra_payload)
+        retry_extra_payload.pop("previous_response_id", None)
+        retry_upstream, retry_error = start_upstream_request(
+            model,
+            full_input_items,
+            instructions=bridge_instructions,
+            reasoning_param=reasoning_param,
+            service_tier=service_tier,
+            thread_session=thread_session,
+            extra_payload=retry_extra_payload,
+        )
+        if retry_error is None and retry_upstream is not None and retry_upstream.status_code < 400:
+            completed_upstream = retry_upstream
+            nonstream_result = _consume_text_completion_nonstream(
+                retry_upstream,
+                requested_model=requested_model,
+                model=model,
+                created=int(time.time()),
+            )
+
     if not isinstance(nonstream_result, dict) or not nonstream_result.get("ok"):
         return build_openai_error_response(
             last_error_info
@@ -1116,6 +1924,12 @@ def completions() -> Response:
     response_id = nonstream_result.get("response_id") or "cmpl"
     usage_obj = nonstream_result.get("usage_obj")
     observed_service_tier = nonstream_result.get("observed_service_tier")
+    save_response_session(
+        thread_session,
+        response_id=response_id,
+        full_input_items=full_input_items,
+        upstream=completed_upstream,
+    )
 
     completion = {
         "id": response_id or "cmpl",
@@ -1127,7 +1941,11 @@ def completions() -> Response:
         ],
         **({"usage": usage_obj} if usage_obj else {}),
     }
-    presented_service_tier = presented_service_tier_name(service_tier, observed_service_tier)
+    presented_service_tier = (
+        presented_service_tier_name(service_tier, observed_service_tier)
+        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
+        else None
+    )
     if presented_service_tier:
         completion["service_tier"] = presented_service_tier
     if verbose:

@@ -3,7 +3,7 @@ package operation_setting
 import "github.com/QuantumNous/new-api/setting/config"
 
 type ChannelAffinityKeySource struct {
-	Type string `json:"type"` // context_int, context_string, gjson
+	Type string `json:"type"` // context_int, context_string, gjson, header
 	Key  string `json:"key,omitempty"`
 	Path string `json:"path,omitempty"`
 }
@@ -37,6 +37,7 @@ type ChannelAffinitySetting struct {
 var codexCliPassThroughHeaders = []string{
 	"Originator",
 	"Session_id",
+	"Conversation_id",
 	"User-Agent",
 	"X-Codex-Beta-Features",
 	"X-Codex-Turn-Metadata",
@@ -72,6 +73,25 @@ func buildPassHeaderTemplate(headers []string) map[string]interface{} {
 	}
 }
 
+func buildCodexChannelTemplate(headers []string) map[string]interface{} {
+	clonedHeaders := make([]string, 0, len(headers))
+	clonedHeaders = append(clonedHeaders, headers...)
+	return map[string]interface{}{
+		"operations": []map[string]interface{}{
+			{
+				"mode":        "pass_headers",
+				"value":       clonedHeaders,
+				"keep_origin": true,
+			},
+			{
+				"mode": "sync_fields",
+				"from": "header:session_id",
+				"to":   "json:prompt_cache_key",
+			},
+		},
+	}
+}
+
 var channelAffinitySetting = ChannelAffinitySetting{
 	Enabled:           true,
 	SwitchOnSuccess:   true,
@@ -81,13 +101,15 @@ var channelAffinitySetting = ChannelAffinitySetting{
 		{
 			Name:       "codex cli trace",
 			ModelRegex: []string{"^gpt-.*$"},
-			PathRegex:  []string{"/v1/responses"},
+			PathRegex:  []string{"/v1/responses", "/v1/responses/compact", "/v1/chat/completions", "/v1/completions"},
 			KeySources: []ChannelAffinityKeySource{
+				{Type: "header", Key: "Session_id"},
 				{Type: "gjson", Path: "prompt_cache_key"},
+				{Type: "gjson", Path: "previous_response_id"},
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(codexCliPassThroughHeaders),
+			ParamOverrideTemplate: buildCodexChannelTemplate(codexCliPassThroughHeaders),
 			SkipRetryOnFailure:    false,
 			IncludeUsingGroup:     true,
 			IncludeRuleName:       true,

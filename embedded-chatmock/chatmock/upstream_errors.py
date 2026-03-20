@@ -6,7 +6,7 @@ import os
 import re
 from typing import Any, Mapping
 
-from flask import Response, jsonify, make_response
+from flask import Response, current_app, has_app_context, jsonify, make_response
 
 from .http import build_cors_headers
 
@@ -347,7 +347,27 @@ def normalized_error_type(info: Mapping[str, Any]) -> str:
     return "server_error"
 
 
+def _client_metadata_minimization_enabled() -> bool:
+    if has_app_context():
+        return bool(current_app.config.get("CLIENT_METADATA_MINIMIZATION", False))
+    return (os.getenv("CHATMOCK_CLIENT_METADATA_MINIMIZATION") or "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 def normalized_error_code(info: Mapping[str, Any]) -> str | None:
+    if _client_metadata_minimization_enabled():
+        category = classify_error(info)
+        if category == "insufficient_balance":
+            return "insufficient_quota"
+        if category == "rate_limited":
+            return "rate_limit_exceeded"
+        if category == "account_invalid":
+            return "invalid_api_key"
+        return None
     raw_code = _compact_string(info.get("raw_code"))
     if raw_code.lower() == "deactivated_workspace":
         return None
@@ -364,8 +384,24 @@ def normalized_error_code(info: Mapping[str, Any]) -> str | None:
 
 
 def normalized_error_message(info: Mapping[str, Any]) -> str:
-    raw_message = _compact_string(info.get("raw_message"))
     category = classify_error(info)
+    if _client_metadata_minimization_enabled():
+        if category == "insufficient_balance":
+            return "Insufficient balance or quota"
+        if category == "rate_limited":
+            return "Rate limit exceeded"
+        if category == "account_invalid":
+            return "Account unavailable"
+        if category == "permission_denied":
+            return "Permission denied"
+        if category == "invalid_request":
+            return "Invalid request"
+        if category == "not_found":
+            return "Resource not found"
+        if category == "request_too_large":
+            return "Request body too large"
+        return "The server had an error while processing your request."
+    raw_message = _compact_string(info.get("raw_message"))
     if raw_message:
         lowered = raw_message.lower()
         if "deactivated_workspace" in lowered:

@@ -487,7 +487,7 @@ export default function SettingsChatCoreRuntime() {
                       'Reasoning Compat',
                       <Select
                         value={settings.reasoningCompat || 'current'}
-                        optionList={selectOptions(['legacy', 'o3', 'think-tags', 'current'])}
+                        optionList={selectOptions(['legacy', 'o3', 'current'])}
                         onChange={(value) => handleSettingChange('reasoningCompat', value)}
                       />,
                     )}

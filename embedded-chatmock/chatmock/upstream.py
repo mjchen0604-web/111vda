@@ -8,6 +8,7 @@ import requests
 from flask import current_app, jsonify, make_response
 from flask import request as flask_request
 
+from .connection_slots import acquire_chatgpt_connection_slot, release_chatgpt_connection_slot
 from .config import CHATGPT_RESPONSES_URL
 from .http import build_cors_headers
 from .reasoning import split_model_alias
@@ -102,6 +103,8 @@ def _start_chatgpt_backend_request(
     parallel_tool_calls: bool = False,
     reasoning_param: Dict[str, Any] | None = None,
     service_tier: str | None = None,
+    extra_payload: Dict[str, Any] | None = None,
+    thread_session: Dict[str, Any] | None = None,
     verbose: bool = False,
 ):
     normalized_service_tier = _normalize_service_tier(service_tier)
@@ -137,7 +140,24 @@ def _start_chatgpt_backend_request(
         )
     except Exception:
         client_session_id = None
-    session_id = ensure_session_id(instructions, input_items, client_session_id)
+    normalized_extra_payload = dict(extra_payload or {})
+    payload_prompt_cache_key = normalized_extra_payload.get("prompt_cache_key")
+    if not isinstance(payload_prompt_cache_key, str) or not payload_prompt_cache_key.strip():
+        payload_prompt_cache_key = None
+    thread_session_key = None
+    if isinstance(thread_session, dict):
+        raw_session_key = thread_session.get("session_key")
+        if isinstance(raw_session_key, str) and raw_session_key.strip():
+            thread_session_key = raw_session_key.strip()
+    session_id = ensure_session_id(
+        instructions,
+        input_items,
+        model=model,
+        tools=tools,
+        tool_choice=tool_choice,
+        parallel_tool_calls=parallel_tool_calls,
+        client_supplied=client_session_id or payload_prompt_cache_key or thread_session_key,
+    )
 
     responses_payload = {
         "model": model,
@@ -150,12 +170,27 @@ def _start_chatgpt_backend_request(
         "stream": True,
         "prompt_cache_key": session_id,
     }
-    if include:
-        responses_payload["include"] = include
+    for key, value in normalized_extra_payload.items():
+        if value is None:
+            continue
+        responses_payload[key] = value
+    existing_include = responses_payload.get("include")
+    merged_include: List[str] = []
+    if isinstance(existing_include, list):
+        for item in existing_include:
+            if isinstance(item, str) and item and item not in merged_include:
+                merged_include.append(item)
+    for item in include:
+        if item not in merged_include:
+            merged_include.append(item)
+    if merged_include:
+        responses_payload["include"] = merged_include
     if reasoning_param is not None:
         responses_payload["reasoning"] = reasoning_param
     if normalized_service_tier is not None:
         responses_payload["service_tier"] = normalized_service_tier
+    if not isinstance(responses_payload.get("prompt_cache_key"), str) or not str(responses_payload.get("prompt_cache_key") or "").strip():
+        responses_payload["prompt_cache_key"] = session_id
     if verbose:
         _log_json("OUTBOUND >> ChatGPT Responses API payload", responses_payload)
 
@@ -176,12 +211,19 @@ def _start_chatgpt_backend_request(
         round_candidates = get_effective_chatgpt_auth_candidates(ensure_fresh=True)
         if not round_candidates:
             break
+        preferred_label = ""
+        preferred_source_path = ""
+        if isinstance(thread_session, dict):
+            preferred_label = str(thread_session.get("candidate_label") or "").strip()
+            preferred_source_path = str(thread_session.get("candidate_url") or "").strip()
 
         for idx in range(len(round_candidates)):
             candidate = claim_chatgpt_auth_candidate(
                 ensure_fresh=True,
                 excluded_labels=tried_labels,
                 session_id=session_id,
+                preferred_label=preferred_label,
+                preferred_source_path=preferred_source_path,
             )
             if not isinstance(candidate, dict):
                 break
@@ -205,8 +247,12 @@ def _start_chatgpt_backend_request(
                 "session_id": session_id,
             }
 
+            slot_id = None
+            session_client = None
             try:
-                upstream = requests.post(
+                slot_id, session_client = acquire_chatgpt_connection_slot(candidate, session_id)
+                request_callable = session_client.post if isinstance(session_client, requests.Session) else requests.post
+                upstream = request_callable(
                     CHATGPT_RESPONSES_URL,
                     headers=headers,
                     json=responses_payload,
@@ -216,6 +262,7 @@ def _start_chatgpt_backend_request(
             except requests.RequestException as exc:
                 last_exception = exc
                 mark_chatgpt_auth_result(label, success=False, account_id=account_id, error_message=str(exc))
+                release_chatgpt_connection_slot(slot_id)
                 _release_auth_candidate_slot(candidate)
                 if verbose:
                     print(f"Upstream request failed for {label}: {exc}")
@@ -241,7 +288,19 @@ def _start_chatgpt_backend_request(
                     continue
                 return upstream, None
 
-            return ManagedAuthUpstream(upstream, candidate, session_id=session_id), None
+            wrapped_upstream = ManagedAuthUpstream(
+                upstream,
+                candidate,
+                session_id=session_id,
+                release_hook=(lambda sid=slot_id: release_chatgpt_connection_slot(sid)),
+            )
+            wrapped_upstream.chatmock_candidate_label = str(candidate.get("label") or "").strip()
+            wrapped_upstream.chatmock_candidate_url = str(candidate.get("source_path") or CHATGPT_RESPONSES_URL).strip()
+            wrapped_upstream.chatmock_source = "chatgpt-backend"
+            wrapped_upstream.chatmock_connection_slot_id = slot_id
+            if isinstance(thread_session, dict):
+                wrapped_upstream.chatmock_thread_mode = thread_session.get("thread_mode")
+            return wrapped_upstream, None
 
     if last_upstream is not None:
         return last_upstream, None
@@ -273,8 +332,9 @@ def start_upstream_request(
     service_tier: str | None = None,
     web_search_mode: str | None = None,
     thread_session: Dict[str, Any] | None = None,
+    extra_payload: Dict[str, Any] | None = None,
 ):
-    _ = web_search_mode, thread_session
+    _ = web_search_mode
     verbose = False
     try:
         verbose = bool(current_app.config.get("VERBOSE"))
@@ -291,5 +351,7 @@ def start_upstream_request(
         parallel_tool_calls=parallel_tool_calls,
         reasoning_param=reasoning_param,
         service_tier=service_tier,
+        extra_payload=extra_payload,
+        thread_session=thread_session,
         verbose=verbose,
     )

@@ -97,15 +97,9 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 	a.ChannelType = info.ChannelType
-
-	// initialize ThinkingContentInfo when thinking_to_content is enabled
-	if info.ChannelSetting.ThinkingToContent {
-		info.ThinkingContentInfo = relaycommon.ThinkingContentInfo{
-			IsFirstThinkingContent:  true,
-			SendLastThinkingContent: false,
-			HasSentThinkingContent:  false,
-		}
-	}
+	// Visible <think> output is unified under the playground-only button.
+	// Channel-level thinking_to_content is deprecated and ignored.
+	info.ChannelSetting.ThinkingToContent = false
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {

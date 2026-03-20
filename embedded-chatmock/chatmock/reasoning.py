@@ -5,6 +5,18 @@ from typing import Any, Dict, Set
 
 DEFAULT_REASONING_EFFORTS: Set[str] = {"minimal", "low", "medium", "high", "xhigh"}
 MODEL_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+VALID_REASONING_COMPAT = {"legacy", "o3", "current"}
+
+
+def normalize_reasoning_compat(value: Any) -> str:
+    if not isinstance(value, str):
+        return "current"
+    normalized = value.strip().lower()
+    if normalized == "think-tags":
+        return "current"
+    if normalized not in VALID_REASONING_COMPAT:
+        return "current"
+    return normalized
 
 
 def split_model_alias(model: str | None) -> tuple[str, str | None, str | None]:
@@ -101,10 +113,7 @@ def apply_reasoning_to_message(
     reasoning_full_text: str,
     compat: str,
 ) -> Dict[str, Any]:
-    try:
-        compat = (compat or "current").strip().lower()
-    except Exception:
-        compat = "current"
+    compat = normalize_reasoning_compat(compat)
 
     if compat == "o3":
         rtxt_parts: list[str] = []
@@ -124,17 +133,6 @@ def apply_reasoning_to_message(
             message["reasoning"] = reasoning_full_text
         return message
 
-    rtxt_parts: list[str] = []
-    if isinstance(reasoning_summary_text, str) and reasoning_summary_text.strip():
-        rtxt_parts.append(reasoning_summary_text)
-    if isinstance(reasoning_full_text, str) and reasoning_full_text.strip():
-        rtxt_parts.append(reasoning_full_text)
-    rtxt = "\n\n".join([p for p in rtxt_parts if p])
-    if rtxt:
-        think_block = f"<think>{rtxt}</think>"
-        content_text = message.get("content") or ""
-        if isinstance(content_text, str):
-            message["content"] = think_block + (content_text or "")
     return message
 
 
@@ -170,6 +168,9 @@ def public_service_tier_name(service_tier: str | None) -> str | None:
     if not isinstance(service_tier, str) or not service_tier.strip():
         return None
     normalized = service_tier.strip().lower()
+    collapsed = normalized.replace(" ", "")
+    if collapsed in ("default", "auto"):
+        return "default" if collapsed == "default" else "auto"
     if normalized in ("fast", "priority"):
         return "priority"
     return normalized

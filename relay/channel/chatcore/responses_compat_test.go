@@ -19,6 +19,11 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 	stream := true
 	temperature := 0.2
 	toolChoice, _ := common.Marshal("auto")
+	contextManagement, _ := common.Marshal(map[string]any{
+		"enabled":               true,
+		"max_input_items":       10,
+		"preserve_recent_items": 4,
+	})
 	tools, _ := common.Marshal([]map[string]any{
 		{
 			"type": "function",
@@ -55,6 +60,7 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 		Temperature: &temperature,
 		ToolChoice:  toolChoice,
 		Tools:       tools,
+		ContextManagement: contextManagement,
 	}
 
 	chatReq, err := responsesRequestToChatCompletionsRequest(req)
@@ -86,6 +92,9 @@ func TestResponsesRequestToChatCompletionsRequest(t *testing.T) {
 	toolsPayload, ok := chatReq["tools"].([]any)
 	if !ok || len(toolsPayload) != 1 {
 		t.Fatalf("unexpected tools: %#v", chatReq["tools"])
+	}
+	if chatReq["context_management"] == nil {
+		t.Fatalf("expected context_management to be preserved, got %#v", chatReq["context_management"])
 	}
 }
 
@@ -145,11 +154,34 @@ func TestChatcoreAdaptorConvertResponsesRequestRewritesPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if info.RequestURLPath != "/v1/chat/completions" {
-		t.Fatalf("expected rewritten path, got %s", info.RequestURLPath)
+	if info.RequestURLPath != "" {
+		t.Fatalf("expected path to stay untouched, got %s", info.RequestURLPath)
 	}
-	if _, ok := converted.(map[string]any); !ok {
-		t.Fatalf("expected map[string]any, got %T", converted)
+	if _, ok := converted.(dto.OpenAIResponsesRequest); !ok {
+		t.Fatalf("expected dto.OpenAIResponsesRequest, got %T", converted)
+	}
+}
+
+func TestChatcoreAdaptorAllowsResponsesCompact(t *testing.T) {
+	adaptor := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+	}
+	input, _ := common.Marshal([]map[string]any{
+		{
+			"role":    "user",
+			"content": "hello",
+		},
+	})
+	converted, err := adaptor.ConvertOpenAIResponsesRequest(nil, info, dto.OpenAIResponsesRequest{
+		Model: "gpt-5.4",
+		Input: input,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := converted.(dto.OpenAIResponsesRequest); !ok {
+		t.Fatalf("expected dto.OpenAIResponsesRequest, got %T", converted)
 	}
 }
 

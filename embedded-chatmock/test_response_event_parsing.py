@@ -76,6 +76,37 @@ def _output_text_done_only_events(text: str):
     ]
 
 
+def _message_done_events_with_usage(text: str):
+    response = {
+        "id": "resp_usage",
+        "usage": {
+            "input_tokens": 120,
+            "output_tokens": 45,
+            "total_tokens": 165,
+            "input_tokens_details": {"cached_tokens": 80},
+            "prompt_cache_hit_tokens": 80,
+        },
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            }
+        ],
+    }
+    return [
+        {
+            "type": "response.output_item.done",
+            "item": response["output"][0],
+            "response": {"id": "resp_usage"},
+        },
+        {
+            "type": "response.completed",
+            "response": response,
+        },
+    ]
+
+
 class ResponseEventParsingTests(unittest.TestCase):
     def test_nonstream_recovers_message_text_from_output_item_done(self):
         upstream = DummyUpstream(_message_done_events("Image summary"))
@@ -155,6 +186,48 @@ class ResponseEventParsingTests(unittest.TestCase):
             payloads.append(json.loads(text[len("data: ") :].strip()))
 
         self.assertTrue(any("error" in entry for entry in payloads))
+
+    def test_nonstream_keeps_cached_usage_fields(self):
+        upstream = DummyUpstream(_message_done_events_with_usage("cached usage"))
+        result = _consume_chat_completion_nonstream(
+            upstream,
+            requested_model="gpt-5.4",
+            model="gpt-5.4",
+            created=0,
+            reasoning_compat="current",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["usage_obj"]["prompt_tokens"], 120)
+        self.assertEqual(result["usage_obj"]["completion_tokens"], 45)
+        self.assertEqual(result["usage_obj"]["prompt_tokens_details"]["cached_tokens"], 80)
+        self.assertEqual(result["usage_obj"]["prompt_cache_hit_tokens"], 80)
+
+    def test_stream_usage_chunk_keeps_cached_usage_fields(self):
+        upstream = DummyUpstream(_message_done_events_with_usage("cached usage"))
+        chunks = list(
+            sse_translate_chat(
+                upstream,
+                "gpt-5.4",
+                0,
+                reasoning_compat="current",
+                include_usage=True,
+            )
+        )
+
+        payloads = []
+        for chunk in chunks:
+            text = chunk.decode("utf-8")
+            if not text.startswith("data: ") or "[DONE]" in text:
+                continue
+            payloads.append(json.loads(text[len("data: ") :].strip()))
+
+        usage_chunks = [entry for entry in payloads if entry.get("usage")]
+        self.assertTrue(usage_chunks)
+        self.assertEqual(usage_chunks[-1]["usage"]["prompt_tokens"], 120)
+        self.assertEqual(usage_chunks[-1]["usage"]["completion_tokens"], 45)
+        self.assertEqual(usage_chunks[-1]["usage"]["prompt_tokens_details"]["cached_tokens"], 80)
+        self.assertEqual(usage_chunks[-1]["usage"]["prompt_cache_hit_tokens"], 80)
 
 
 if __name__ == "__main__":

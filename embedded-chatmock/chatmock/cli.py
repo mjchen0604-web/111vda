@@ -325,11 +325,10 @@ def main() -> None:
     )
     p_serve.add_argument(
         "--reasoning-compat",
-        choices=["legacy", "o3", "think-tags", "current"],
+        choices=["legacy", "o3", "current"],
         default=os.getenv("CHATGPT_LOCAL_REASONING_COMPAT", "current").lower(),
         help=(
-            "Compatibility mode for exposing reasoning to clients (legacy|o3|think-tags). "
-            "'current' is accepted as an alias for 'legacy'"
+            "Compatibility mode for exposing reasoning to clients (legacy|o3|current)."
         ),
     )
     p_serve.add_argument(

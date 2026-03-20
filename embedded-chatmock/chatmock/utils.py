@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from .config import CHATGPT_RESPONSES_URL, CLIENT_ID_DEFAULT, OAUTH_TOKEN_URL
+from .reasoning import normalize_reasoning_compat
 from .upstream_errors import (
     build_error_info,
     classify_error,
@@ -23,6 +24,7 @@ from .upstream_errors import (
     normalized_error_payload,
     should_retry_next_candidate,
 )
+from .usage_passthrough import extract_responses_usage_from_event, to_chat_usage
 
 
 _AUTH_POOL_RR_LOCK = threading.Lock()
@@ -127,12 +129,19 @@ def _mark_upstream_failure(upstream: Any, error_info: Dict[str, Any] | None = No
 
 
 class ManagedAuthUpstream:
-    def __init__(self, upstream: Any, candidate: Dict[str, Any], session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        upstream: Any,
+        candidate: Dict[str, Any],
+        session_id: str | None = None,
+        release_hook=None,
+    ) -> None:
         self._upstream = upstream
         self._candidate = dict(candidate or {})
         self._session_id = str(session_id or "").strip() or None
         self._released = False
         self._marked = False
+        self._release_hook = release_hook
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._upstream, name)
@@ -141,6 +150,11 @@ class ManagedAuthUpstream:
         if self._released:
             return
         self._released = True
+        if callable(self._release_hook):
+            try:
+                self._release_hook()
+            except Exception:
+                pass
         _release_auth_candidate_slot(self._candidate)
 
     def _mark_success(self) -> None:
@@ -301,6 +315,27 @@ def _preferred_chatgpt_auth_candidate_for_session(
         if binding_source_path and candidate_source_path == binding_source_path:
             return candidate
     clear_chatgpt_auth_session_binding(session_id)
+    return None
+
+
+def _preferred_chatgpt_auth_candidate_for_hint(
+    candidates: List[Dict[str, Any]],
+    preferred_label: str | None,
+    preferred_source_path: str | None,
+) -> Dict[str, Any] | None:
+    label = str(preferred_label or "").strip()
+    source_path = str(preferred_source_path or "").strip()
+    if not label and not source_path:
+        return None
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_label = str(candidate.get("label") or "").strip()
+        candidate_source_path = str(candidate.get("source_path") or "").strip()
+        if label and candidate_label == label:
+            return candidate
+        if source_path and candidate_source_path == source_path:
+            return candidate
     return None
 
 
@@ -887,6 +922,82 @@ def _get_account_cooldown(account_id: str) -> float:
     return until_ts
 
 
+def _get_candidate_rate_limit_cooldown(label: str) -> float:
+    if not label:
+        return 0.0
+    with _AUTH_POOL_STATE_LOCK:
+        until_ts = float((_AUTH_POOL_STATE.get(label) or {}).get("codex_cooldown_until") or 0.0)
+    now = time.time()
+    if until_ts <= now:
+        with _AUTH_POOL_STATE_LOCK:
+            state = dict(_AUTH_POOL_STATE.get(label) or {})
+            state["codex_cooldown_until"] = 0.0
+            _AUTH_POOL_STATE[label] = state
+        return 0.0
+    return until_ts
+
+
+def _candidate_codex_pressure_score(candidate: Dict[str, Any]) -> tuple[int, float]:
+    if not isinstance(candidate, dict):
+        return (1, 1000.0)
+    label = str(candidate.get("label") or "").strip()
+    if not label:
+        return (1, 1000.0)
+    with _AUTH_POOL_STATE_LOCK:
+        state = dict(_AUTH_POOL_STATE.get(label) or {})
+    primary_used = float(state.get("codex_primary_used_percent") or 0.0)
+    secondary_used = float(state.get("codex_secondary_used_percent") or 0.0)
+    exhausted = 1 if _get_candidate_rate_limit_cooldown(label) > time.time() else 0
+    return (exhausted, max(primary_used, secondary_used))
+
+
+def _sort_candidates_by_codex_pressure(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if len(candidates) <= 1:
+        return candidates
+    return sorted(candidates, key=_candidate_codex_pressure_score)
+
+
+def update_chatgpt_candidate_rate_limits(
+    label: str,
+    *,
+    primary_used_percent: float | None = None,
+    primary_window_minutes: int | None = None,
+    primary_resets_in_seconds: int | None = None,
+    secondary_used_percent: float | None = None,
+    secondary_window_minutes: int | None = None,
+    secondary_resets_in_seconds: int | None = None,
+) -> None:
+    if not isinstance(label, str) or not label.strip():
+        return
+    label = label.strip()
+    now = time.time()
+    exhausted_windows: List[float] = []
+    for used_percent, resets_in_seconds in (
+        (primary_used_percent, primary_resets_in_seconds),
+        (secondary_used_percent, secondary_resets_in_seconds),
+    ):
+        if isinstance(used_percent, (int, float)) and float(used_percent) >= 100.0 and isinstance(resets_in_seconds, int) and resets_in_seconds > 0:
+            exhausted_windows.append(now + float(resets_in_seconds))
+    codex_cooldown_until = max(exhausted_windows) if exhausted_windows else 0.0
+    with _AUTH_POOL_STATE_LOCK:
+        state = dict(_AUTH_POOL_STATE.get(label) or {})
+        if primary_used_percent is not None:
+            state["codex_primary_used_percent"] = float(primary_used_percent)
+        if primary_window_minutes is not None:
+            state["codex_primary_window_minutes"] = int(primary_window_minutes)
+        if primary_resets_in_seconds is not None:
+            state["codex_primary_resets_in_seconds"] = int(primary_resets_in_seconds)
+        if secondary_used_percent is not None:
+            state["codex_secondary_used_percent"] = float(secondary_used_percent)
+        if secondary_window_minutes is not None:
+            state["codex_secondary_window_minutes"] = int(secondary_window_minutes)
+        if secondary_resets_in_seconds is not None:
+            state["codex_secondary_resets_in_seconds"] = int(secondary_resets_in_seconds)
+        state["codex_cooldown_until"] = codex_cooldown_until
+        state["updated_at"] = now
+        _AUTH_POOL_STATE[label] = state
+
+
 def is_auth_candidate_blocked(candidate: Dict[str, Any]) -> bool:
     if not isinstance(candidate, dict):
         return True
@@ -896,6 +1007,9 @@ def is_auth_candidate_blocked(candidate: Dict[str, Any]) -> bool:
         return True
     cooldown_until = _get_account_cooldown(label)
     if cooldown_until > time.time():
+        return True
+    codex_cooldown_until = _get_candidate_rate_limit_cooldown(label)
+    if codex_cooldown_until > time.time():
         return True
     return False
 
@@ -1312,22 +1426,34 @@ def claim_chatgpt_auth_candidate(
     ensure_fresh: bool = True,
     excluded_labels: set[str] | None = None,
     session_id: str | None = None,
+    preferred_label: str | None = None,
+    preferred_source_path: str | None = None,
 ) -> Dict[str, Any] | None:
     excluded = excluded_labels or set()
     candidates = get_effective_chatgpt_auth_candidates(ensure_fresh=ensure_fresh)
     candidates = [candidate for candidate in candidates if str(candidate.get("label") or "").strip() not in excluded]
     if not candidates:
         return None
-    sticky_candidate = _preferred_chatgpt_auth_candidate_for_session(candidates, session_id)
+    sticky_candidate = _preferred_chatgpt_auth_candidate_for_hint(
+        candidates,
+        preferred_label,
+        preferred_source_path,
+    )
+    if not isinstance(sticky_candidate, dict):
+        sticky_candidate = _preferred_chatgpt_auth_candidate_for_session(candidates, session_id)
     if isinstance(sticky_candidate, dict):
         sticky_label = str(sticky_candidate.get("label") or "").strip()
         prioritized: List[Dict[str, Any]] = [sticky_candidate]
+        tail_candidates: List[Dict[str, Any]] = []
         for candidate in candidates:
             candidate_label = str(candidate.get("label") or "").strip()
             if sticky_label and candidate_label == sticky_label:
                 continue
-            prioritized.append(candidate)
+            tail_candidates.append(candidate)
+        prioritized.extend(_sort_candidates_by_codex_pressure(tail_candidates))
         candidates = prioritized
+    else:
+        candidates = _sort_candidates_by_codex_pressure(candidates)
     limit = get_max_inflight_per_account()
     preferred = []
     fallback = []
@@ -1575,6 +1701,8 @@ def _state_for_label(label: str) -> Dict[str, Any]:
         else ""
     )
     inflight = int(state.get("inflight") or 0)
+    codex_cooldown_until = float(state.get("codex_cooldown_until") or 0.0)
+    codex_remaining = max(0, int(codex_cooldown_until - now))
     return {
         "status": state.get("status") or "ready",
         "failures": int(state.get("failures") or 0),
@@ -1586,6 +1714,14 @@ def _state_for_label(label: str) -> Dict[str, Any]:
         "cooldown_until": cooldown_until,
         "cooldown_remaining": remaining,
         "unlock_at": unlock_at,
+        "codex_cooldown_until": codex_cooldown_until,
+        "codex_cooldown_remaining": codex_remaining,
+        "codex_primary_used_percent": state.get("codex_primary_used_percent"),
+        "codex_primary_window_minutes": state.get("codex_primary_window_minutes"),
+        "codex_primary_resets_in_seconds": state.get("codex_primary_resets_in_seconds"),
+        "codex_secondary_used_percent": state.get("codex_secondary_used_percent"),
+        "codex_secondary_window_minutes": state.get("codex_secondary_window_minutes"),
+        "codex_secondary_resets_in_seconds": state.get("codex_secondary_resets_in_seconds"),
         "inflight": inflight,
         "updated_at": state.get("updated_at"),
     }
@@ -1717,6 +1853,8 @@ def _runtime_excluded_reason(record: Dict[str, Any]) -> str:
     raw_code = str(record.get("last_raw_code") or "").strip().lower()
     if classification == "account_invalid" or raw_code == "deactivated_workspace":
         return "account_invalid"
+    if int(record.get("codex_cooldown_remaining") or 0) > 0:
+        return "codex_rate_limited"
     if int(record.get("cooldown_remaining") or 0) > 0:
         return "cooldown"
     if not bool(record.get("has_access_token")):
@@ -2050,9 +2188,10 @@ def sse_translate_chat(
     reasoning_compat: str = "current",
     *,
     include_usage: bool = False,
+    on_response_completed=None,
 ):
     response_id = "chatcmpl-stream"
-    compat = (reasoning_compat or "current").strip().lower()
+    compat = normalize_reasoning_compat(reasoning_compat)
     think_open = False
     think_closed = False
     saw_output = False
@@ -2092,17 +2231,6 @@ def sse_translate_chat(
         else:
             return "{}"
     
-    def _extract_usage(evt: Dict[str, Any]) -> Dict[str, int] | None:
-        try:
-            usage = (evt.get("response") or {}).get("usage")
-            if not isinstance(usage, dict):
-                return None
-            pt = int(usage.get("input_tokens") or 0)
-            ct = int(usage.get("output_tokens") or 0)
-            tt = int(usage.get("total_tokens") or (pt + ct))
-            return {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
-        except Exception:
-            return None
     try:
         try:
             line_iterator = upstream.iter_lines(decode_unicode=False)
@@ -2406,9 +2534,16 @@ def sse_translate_chat(
                 break
             elif kind == "response.completed":
                 saw_completed = True
-                m = _extract_usage(evt)
+                m = extract_responses_usage_from_event(evt)
                 if m:
-                    upstream_usage = m
+                    upstream_usage = to_chat_usage(m)
+                if callable(on_response_completed):
+                    response_obj = evt.get("response")
+                    if isinstance(response_obj, dict):
+                        try:
+                            on_response_completed(response_obj, upstream)
+                        except Exception:
+                            pass
                 if compat == "think-tags" and think_open and not think_closed:
                     close_chunk = {
                         "id": response_id,
@@ -2523,24 +2658,22 @@ def sse_translate_chat(
         upstream.close()
 
 
-def sse_translate_text(upstream, model: str, created: int, verbose: bool = False, vlog=None, *, include_usage: bool = False):
+def sse_translate_text(
+    upstream,
+    model: str,
+    created: int,
+    verbose: bool = False,
+    vlog=None,
+    *,
+    include_usage: bool = False,
+    on_response_completed=None,
+):
     response_id = "cmpl-stream"
     upstream_usage = None
     has_visible_output = False
     emitted_output_text = ""
     saw_completed = False
     
-    def _extract_usage(evt: Dict[str, Any]) -> Dict[str, int] | None:
-        try:
-            usage = (evt.get("response") or {}).get("usage")
-            if not isinstance(usage, dict):
-                return None
-            pt = int(usage.get("input_tokens") or 0)
-            ct = int(usage.get("output_tokens") or 0)
-            tt = int(usage.get("total_tokens") or (pt + ct))
-            return {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
-        except Exception:
-            return None
     try:
         for raw_line in upstream.iter_lines(decode_unicode=False):
             if not raw_line:
@@ -2638,12 +2771,18 @@ def sse_translate_text(upstream, model: str, created: int, verbose: bool = False
                     yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
             elif kind == "response.completed":
                 saw_completed = True
-                m = _extract_usage(evt)
+                m = extract_responses_usage_from_event(evt)
                 if m:
-                    upstream_usage = m
+                    upstream_usage = to_chat_usage(m)
+                response_obj = evt.get("response")
+                if callable(on_response_completed) and isinstance(response_obj, dict):
+                    try:
+                        on_response_completed(response_obj, upstream)
+                    except Exception:
+                        pass
                 emitted_output_text, missing_delta = merge_response_text(
                     emitted_output_text,
-                    extract_response_output_text(evt.get("response")),
+                    extract_response_output_text(response_obj),
                 )
                 if missing_delta:
                     has_visible_output = True

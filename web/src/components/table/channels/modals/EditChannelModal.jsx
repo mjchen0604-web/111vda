@@ -3868,21 +3868,6 @@ const EditChannelModal = (props) => {
                       />
                     )}
 
-                    <Form.Switch
-                      field='thinking_to_content'
-                      label={t('思考内容转换')}
-                      checkedText={t('开')}
-                      uncheckedText={t('关')}
-                      onChange={(value) =>
-                        handleChannelSettingsChange(
-                          'thinking_to_content',
-                          value,
-                        )
-                      }
-                      extraText={t(
-                        '将 reasoning_content 转换为 <think> 标签拼接到内容中',
-                      )}
-                    />
 
                     <Form.Switch
                       field='pass_through_body_enabled'

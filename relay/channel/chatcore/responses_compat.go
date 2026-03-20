@@ -154,6 +154,7 @@ func responsesRequestToChatCompletionsRequest(request dto.OpenAIResponsesRequest
 		TopLogProbs:          request.TopLogProbs,
 		Metadata:             request.Metadata,
 		Store:                request.Store,
+		ContextManagement:    request.ContextManagement,
 		PromptCacheRetention: request.PromptCacheRetention,
 		SafetyIdentifier:     request.SafetyIdentifier,
 		User:                 request.User,

@@ -188,6 +188,23 @@ def record_rate_limits_from_response(response: Any) -> None:
     if snapshot is None:
         return
     store_rate_limit_snapshot(snapshot)
+    label = str(getattr(response, "chatmock_candidate_label", "") or "").strip()
+    if not label:
+        return
+    try:
+        from .utils import update_chatgpt_candidate_rate_limits
+
+        update_chatgpt_candidate_rate_limits(
+            label,
+            primary_used_percent=snapshot.primary.used_percent if snapshot.primary else None,
+            primary_window_minutes=snapshot.primary.window_minutes if snapshot.primary else None,
+            primary_resets_in_seconds=snapshot.primary.resets_in_seconds if snapshot.primary else None,
+            secondary_used_percent=snapshot.secondary.used_percent if snapshot.secondary else None,
+            secondary_window_minutes=snapshot.secondary.window_minutes if snapshot.secondary else None,
+            secondary_resets_in_seconds=snapshot.secondary.resets_in_seconds if snapshot.secondary else None,
+        )
+    except Exception:
+        pass
 
 
 def compute_reset_at(captured_at: datetime, window: RateLimitWindow) -> Optional[datetime]:
