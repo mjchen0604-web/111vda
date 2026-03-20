@@ -16,8 +16,7 @@ func GetLongContextMaxTokens() int {
 }
 
 func SupportsLongContextSurcharge(modelName string) bool {
-	normalized := strings.ToLower(FormatMatchingModelName(modelName))
-	return strings.HasPrefix(normalized, "gpt-5.4")
+	return false
 }
 
 func IsTurboPerformanceModel(modelName string) bool {

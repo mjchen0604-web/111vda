@@ -1957,6 +1957,7 @@ export function renderLogContent(
   webSearchCallCount = 0,
   fileSearch = false,
   fileSearchCallCount = 0,
+  modelName = '',
   displayMode = 'price',
 ) {
   const {
@@ -1979,23 +1980,29 @@ export function renderLogContent(
       ]);
     }
 
+    const inputBaseMultiplier = getOpenAIInputBaseMultiplier(modelName, 1);
     const parts = [
       i18next.t('输入价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
-        price: (modelRatio * 2.0 * rate).toFixed(6),
+        price: (modelRatio * inputBaseMultiplier * rate).toFixed(6),
       }),
       i18next.t('补全价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
-        price: (modelRatio * 2.0 * completionRatio * rate).toFixed(6),
+        price: (
+          modelRatio *
+          inputBaseMultiplier *
+          completionRatio *
+          rate
+        ).toFixed(6),
       }),
     ];
     appendPricePart(parts, cacheRatio !== 1.0, '缓存读取价格 {{symbol}}{{price}} / 1M tokens', {
       symbol,
-      price: (modelRatio * 2.0 * cacheRatio * rate).toFixed(6),
+      price: (modelRatio * inputBaseMultiplier * cacheRatio * rate).toFixed(6),
     });
     appendPricePart(parts, image, '图片输入价格 {{symbol}}{{price}} / 1M tokens', {
       symbol,
-      price: (modelRatio * 2.0 * imageRatio * rate).toFixed(6),
+      price: (modelRatio * inputBaseMultiplier * imageRatio * rate).toFixed(6),
     });
     appendPricePart(parts, webSearch, 'Web 搜索调用 {{webSearchCallCount}} 次', {
       webSearchCallCount,

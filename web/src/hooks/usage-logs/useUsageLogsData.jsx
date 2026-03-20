@@ -441,6 +441,7 @@ export const useLogsData = () => {
                 other.web_search_call_count || 0,
                 other.file_search || false,
                 other.file_search_call_count || 0,
+                logs[i].model_name || '',
                 billingDisplayMode,
               ),
         });
