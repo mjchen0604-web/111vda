@@ -204,7 +204,7 @@ function readSettingsForm() {
     maxRetryInterval: Number(nodes.setMaxRetryInterval?.value || 5),
     reasoningEffort: nodes.setReasoningEffort?.value || "medium",
     reasoningSummary: nodes.setReasoningSummary?.value || "auto",
-    reasoningCompat: nodes.setReasoningCompat?.value || "think-tags",
+    reasoningCompat: nodes.setReasoningCompat?.value || "current",
     exposeReasoningModels: Boolean(nodes.setExposeReasoningModels?.checked),
     verbose: Boolean(nodes.setVerbose?.checked),
     verboseObfuscation: Boolean(nodes.setVerboseObfuscation?.checked),
@@ -236,7 +236,7 @@ function applySettingsForm(settings = {}) {
     nodes.setReasoningSummary.value = settings.reasoningSummary || "auto";
   }
   if (nodes.setReasoningCompat) {
-    nodes.setReasoningCompat.value = settings.reasoningCompat || "think-tags";
+    nodes.setReasoningCompat.value = settings.reasoningCompat || "current";
   }
   if (nodes.setExposeReasoningModels) {
     nodes.setExposeReasoningModels.checked = Boolean(settings.exposeReasoningModels);

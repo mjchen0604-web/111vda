@@ -102,9 +102,9 @@ def apply_reasoning_to_message(
     compat: str,
 ) -> Dict[str, Any]:
     try:
-        compat = (compat or "think-tags").strip().lower()
+        compat = (compat or "current").strip().lower()
     except Exception:
-        compat = "think-tags"
+        compat = "current"
 
     if compat == "o3":
         rtxt_parts: list[str] = []

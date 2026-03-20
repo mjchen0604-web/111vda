@@ -24,7 +24,7 @@ const EMPTY_SETTINGS = {
   serviceTier: '',
   reasoningEffort: 'minimal',
   reasoningSummary: 'auto',
-  reasoningCompat: 'think-tags',
+  reasoningCompat: 'current',
   exposeReasoningModels: false,
   verbose: false,
   verboseObfuscation: false,
@@ -486,7 +486,7 @@ export default function SettingsChatCoreRuntime() {
                     {controlBlock(
                       'Reasoning Compat',
                       <Select
-                        value={settings.reasoningCompat || 'think-tags'}
+                        value={settings.reasoningCompat || 'current'}
                         optionList={selectOptions(['legacy', 'o3', 'think-tags', 'current'])}
                         onChange={(value) => handleSettingChange('reasoningCompat', value)}
                       />,

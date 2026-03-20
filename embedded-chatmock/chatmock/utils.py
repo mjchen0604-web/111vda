@@ -2047,12 +2047,12 @@ def sse_translate_chat(
     created: int,
     verbose: bool = False,
     vlog=None,
-    reasoning_compat: str = "think-tags",
+    reasoning_compat: str = "current",
     *,
     include_usage: bool = False,
 ):
     response_id = "chatcmpl-stream"
-    compat = (reasoning_compat or "think-tags").strip().lower()
+    compat = (reasoning_compat or "current").strip().lower()
     think_open = False
     think_closed = False
     saw_output = False

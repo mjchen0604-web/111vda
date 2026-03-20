@@ -27,6 +27,7 @@ _VALID_ROUTING_STRATEGIES = {"round-robin", "random", "first"}
 _VALID_REASONING_EFFORT = {"minimal", "low", "medium", "high", "xhigh"}
 _VALID_REASONING_SUMMARY = {"auto", "concise", "detailed", "none"}
 _VALID_REASONING_COMPAT = {"legacy", "o3", "think-tags", "current"}
+_DEFAULT_REASONING_COMPAT = "current"
 
 
 def _model_ids(expose_variants: bool) -> List[str]:
@@ -242,7 +243,7 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
     if runtime_app is not None:
         reasoning_effort = str(runtime_app.config.get("REASONING_EFFORT", "medium"))
         reasoning_summary = str(runtime_app.config.get("REASONING_SUMMARY", "auto"))
-        reasoning_compat = str(runtime_app.config.get("REASONING_COMPAT", "think-tags"))
+        reasoning_compat = str(runtime_app.config.get("REASONING_COMPAT", _DEFAULT_REASONING_COMPAT))
         expose_reasoning_models = bool(runtime_app.config.get("EXPOSE_REASONING_MODELS"))
         enable_web_search = False
         verbose = bool(runtime_app.config.get("VERBOSE"))
@@ -250,11 +251,15 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
     else:
         reasoning_effort = os.getenv("CHATGPT_LOCAL_REASONING_EFFORT", "medium")
         reasoning_summary = os.getenv("CHATGPT_LOCAL_REASONING_SUMMARY", "auto")
-        reasoning_compat = os.getenv("CHATGPT_LOCAL_REASONING_COMPAT", "think-tags")
+        reasoning_compat = os.getenv("CHATGPT_LOCAL_REASONING_COMPAT", _DEFAULT_REASONING_COMPAT)
         expose_reasoning_models = _bool_env("CHATGPT_LOCAL_EXPOSE_REASONING_MODELS", default=False)
         enable_web_search = False
         verbose = _bool_env("CHATGPT_LOCAL_VERBOSE", default=False)
         verbose_obfuscation = _bool_env("CHATGPT_LOCAL_VERBOSE_OBFUSCATION", default=False)
+
+    if not _bool_value(stored.get("reasoningCompatPinned"), default=False):
+        if str(stored.get("reasoningCompat") or "").strip().lower() == "think-tags":
+            reasoning_compat = _DEFAULT_REASONING_COMPAT
 
     return {
         "routingStrategy": _clean_choice(
@@ -266,7 +271,7 @@ def _current_settings_snapshot(app=None) -> Dict[str, Any]:
         "maxRetryInterval": get_max_retry_interval_seconds(),
         "reasoningEffort": _clean_choice(reasoning_effort, _VALID_REASONING_EFFORT, "medium"),
         "reasoningSummary": _clean_choice(reasoning_summary, _VALID_REASONING_SUMMARY, "auto"),
-        "reasoningCompat": _clean_choice(reasoning_compat, _VALID_REASONING_COMPAT, "think-tags"),
+        "reasoningCompat": _clean_choice(reasoning_compat, _VALID_REASONING_COMPAT, _DEFAULT_REASONING_COMPAT),
         "exposeReasoningModels": bool(expose_reasoning_models),
         "enableWebSearch": bool(enable_web_search),
         "verbose": bool(verbose),
@@ -393,6 +398,7 @@ def _apply_settings(settings: Dict[str, Any], *, app=None, persist: bool) -> Dic
     if persist:
         stored = _read_settings_file()
         stored.update(merged)
+        stored["reasoningCompatPinned"] = True
         stored["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         _write_settings_file(stored)
 
@@ -404,6 +410,9 @@ def apply_persisted_dashboard_settings(app) -> Dict[str, Any]:
     if not stored:
         return _current_settings_snapshot(app=app)
     stored = dict(stored)
+    if not _bool_value(stored.get("reasoningCompatPinned"), default=False):
+        if str(stored.get("reasoningCompat") or "").strip().lower() == "think-tags":
+            stored["reasoningCompat"] = _DEFAULT_REASONING_COMPAT
     stored["authFiles"] = _configured_auth_files(stored)
     return _apply_settings(stored, app=app, persist=False)
 

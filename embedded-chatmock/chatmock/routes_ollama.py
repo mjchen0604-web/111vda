@@ -295,7 +295,7 @@ def ollama_chat() -> Response:
     verbose = bool(current_app.config.get("VERBOSE"))
     reasoning_effort = current_app.config.get("REASONING_EFFORT", "medium")
     reasoning_summary = current_app.config.get("REASONING_SUMMARY", "auto")
-    reasoning_compat = current_app.config.get("REASONING_COMPAT", "think-tags")
+    reasoning_compat = current_app.config.get("REASONING_COMPAT", "current")
 
     try:
         raw = request.get_data(cache=True, as_text=True) or ""
@@ -456,7 +456,7 @@ def ollama_chat() -> Response:
 
     if stream_req:
         def _gen(current_upstream):
-            compat = (current_app.config.get("REASONING_COMPAT", "think-tags") or "think-tags").strip().lower()
+            compat = (current_app.config.get("REASONING_COMPAT", "current") or "current").strip().lower()
             think_open = False
             think_closed = False
             saw_any_summary = False
@@ -790,7 +790,7 @@ def ollama_chat() -> Response:
             )
         return build_ollama_error_response(error_info)
 
-    if (current_app.config.get("REASONING_COMPAT", "think-tags") or "think-tags").strip().lower() == "think-tags":
+    if (current_app.config.get("REASONING_COMPAT", "current") or "current").strip().lower() == "think-tags":
         rtxt_parts = []
         if isinstance(reasoning_summary_text, str) and reasoning_summary_text.strip():
             rtxt_parts.append(reasoning_summary_text)

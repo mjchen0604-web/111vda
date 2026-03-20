@@ -500,7 +500,7 @@ def chat_completions() -> Response:
     verbose_obfuscation = bool(current_app.config.get("VERBOSE_OBFUSCATION"))
     reasoning_effort = current_app.config.get("REASONING_EFFORT", "medium")
     reasoning_summary = current_app.config.get("REASONING_SUMMARY", "auto")
-    reasoning_compat = current_app.config.get("REASONING_COMPAT", "think-tags")
+    reasoning_compat = current_app.config.get("REASONING_COMPAT", "current")
     debug_model = current_app.config.get("DEBUG_MODEL")
 
     raw = request.get_data(cache=True, as_text=True) or ""
