@@ -84,11 +84,12 @@ function buildChannelAffinityTooltip(affinity, t) {
   const keyText = `${keySource}:${keyPath}${keyFp}`;
 
   const lines = [
-    t('渠道亲和性'),
+    t('本地渠道亲和性复用'),
     `${t('规则')}：${affinity.rule_name || '-'}`,
     `${t('分组')}：${affinity.selected_group || '-'}`,
     `${t('Key')}：${keyText}`,
     ...(keyHint ? [`${t('Key 摘要')}：${keyHint}`] : []),
+    t('说明：按该 Key 复用上一次成功渠道，不代表上游 Prompt Cache 已命中。'),
   ];
 
   return (
@@ -392,6 +393,7 @@ export const getLogsColumns = ({
                 <Tooltip
                   content={
                     <div style={{ lineHeight: 1.6 }}>
+                      <div>{t('本地渠道亲和性已命中')}</div>
                       <div>{content}</div>
                       {affinity ? (
                         <div style={{ marginTop: 6 }}>

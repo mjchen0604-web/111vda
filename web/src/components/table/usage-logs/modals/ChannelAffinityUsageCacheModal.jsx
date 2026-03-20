@@ -193,7 +193,7 @@ const ChannelAffinityUsageCacheModal = ({
 
   return (
     <Modal
-      title={t('渠道亲和性：上游缓存命中')}
+      title={t('上游 Prompt Cache 命中统计')}
       visible={showChannelAffinityUsageCacheModal}
       onCancel={() => setShowChannelAffinityUsageCacheModal(false)}
       footer={null}
@@ -206,7 +206,11 @@ const ChannelAffinityUsageCacheModal = ({
         <div style={{ marginBottom: 12 }}>
           <Text type='tertiary' size='small'>
             {t(
-              '命中判定：usage 中存在 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）即视为命中。',
+              '五角星仅表示本地渠道亲和性命中：系统按 prompt_cache_key 复用了上一次成功渠道。',
+            )}
+            {' '}
+            {t(
+              '这不等于上游 Prompt Cache 命中；只有 usage 中出现 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）才视为上游命中。',
             )}
             {' '}
             {t(
