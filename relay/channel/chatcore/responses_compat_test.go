@@ -278,3 +278,79 @@ func TestResponsesCompatStreamHandlerEmitsFunctionCallEvents(t *testing.T) {
 		t.Fatalf("expected response.function_call_arguments.done, got %s", body)
 	}
 }
+
+func TestResponsesCompatHandlerFallsBackToTextUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx.Set(common.RequestIdKey, "chatcore_resp_nonstream_fallback")
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_345","object":"chat.completion","created":123,"model":"claude-3-5-sonnet","choices":[{"index":0,"message":{"role":"assistant","content":"fallback body text"},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`,
+		)),
+		Header: make(http.Header),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "claude-3-5-sonnet",
+		},
+	}
+	info.SetEstimatePromptTokens(10)
+
+	usage, err := responsesCompatHandler(ctx, resp, info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage == nil || usage.TotalTokens <= 0 || usage.PromptTokens != 10 {
+		t.Fatalf("expected fallback usage, got %#v", usage)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"total_tokens"`) {
+		t.Fatalf("expected marshaled response usage in body, got %s", body)
+	}
+}
+
+func TestResponsesCompatStreamHandlerFallsBackToTextUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	constant.StreamingTimeout = 1
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx.Set(common.RequestIdKey, "chatcore_resp_stream_fallback")
+
+	streamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_456","object":"chat.completion.chunk","created":123,"model":"claude-3-5-sonnet","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_456","object":"chat.completion.chunk","created":123,"model":"claude-3-5-sonnet","choices":[{"index":0,"delta":{"content":"fallback streamed text"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl_456","object":"chat.completion.chunk","created":123,"model":"claude-3-5-sonnet","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`,
+		``,
+	}, "\n")
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(streamBody)),
+		Header:     make(http.Header),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "claude-3-5-sonnet",
+		},
+	}
+	info.SetEstimatePromptTokens(11)
+
+	usage, err := responsesCompatStreamHandler(ctx, resp, info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage == nil || usage.TotalTokens <= 0 || usage.PromptTokens != 11 {
+		t.Fatalf("expected fallback usage, got %#v", usage)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"type":"response.completed"`) {
+		t.Fatalf("expected response.completed event, got %s", body)
+	}
+}

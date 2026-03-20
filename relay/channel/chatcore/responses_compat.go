@@ -401,12 +401,23 @@ func responsesCompatHandler(c *gin.Context, resp *http.Response, info *relaycomm
 	}
 
 	responsesResp := chatCompletionsToResponsesResponse(&chatResp)
+	usage := chatResp.Usage
+	if usage.TotalTokens == 0 && info != nil {
+		content := ""
+		if len(chatResp.Choices) > 0 {
+			content = chatResp.Choices[0].Message.StringContent()
+		}
+		if content != "" {
+			usage = *service.ResponseText2Usage(c, content, info.UpstreamModelName, info.GetEstimatePromptTokens())
+			responsesResp.Usage = &usage
+		}
+	}
 	responseBody, err := common.Marshal(responsesResp)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
 	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
-	return &chatResp.Usage, nil
+	return &usage, nil
 }
 
 func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
@@ -696,6 +707,13 @@ func responsesCompatStreamHandler(c *gin.Context, resp *http.Response, info *rel
 		Output:             output,
 		PreviousResponseID: previousResponseID,
 		Usage:              &usage,
+	}
+	if usage.TotalTokens == 0 {
+		fallback := service.ResponseText2Usage(c, outputText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		if fallback != nil {
+			usage = *fallback
+			finalResponse.Usage = &usage
+		}
 	}
 	if !sendEvent(dto.ResponsesStreamResponse{
 		Type:     "response.completed",
