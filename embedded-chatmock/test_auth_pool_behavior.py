@@ -16,6 +16,7 @@ from chatmock.utils import (
     _clear_invalid_auth_candidate,
     _candidate_codex_pressure_score,
     _dedupe_candidates_by_account_id,
+    _remove_account_state,
     _remove_label_state,
     _preferred_chatgpt_auth_candidate_for_hint,
     _state_for_label,
@@ -46,8 +47,9 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         for label in ("acc01/auth.json", "acc02/auth.json"):
             _remove_label_state(label)
             _clear_invalid_auth_candidate(label=label)
+        _remove_account_state("same-account")
 
-    def test_same_account_id_with_different_sources_is_not_deduped(self):
+    def test_same_account_id_with_different_sources_is_deduped(self):
         candidates = [
             {
                 "label": "acc01/auth.json",
@@ -61,7 +63,7 @@ class AuthPoolBehaviorTests(unittest.TestCase):
             },
         ]
         deduped = _dedupe_candidates_by_account_id(candidates)
-        self.assertEqual(len(deduped), 2)
+        self.assertEqual(len(deduped), 1)
 
     def test_parse_auth_files_env_discovers_new_auth_files_under_same_root(self):
         original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
@@ -160,7 +162,7 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         self.assertIsNotNone(preferred)
         self.assertEqual(preferred["label"], "acc02/auth.json")
 
-    def test_rate_limited_candidate_only_cools_down_current_credential(self):
+    def test_rate_limited_candidate_cools_down_same_account_duplicates(self):
         candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}
         candidate2 = {"label": "acc02/auth.json", "account_id": "same-account"}
         info = {
@@ -170,7 +172,7 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         }
         handle_chatgpt_candidate_failure(candidate1, info)
         self.assertTrue(is_auth_candidate_blocked(candidate1))
-        self.assertFalse(is_auth_candidate_blocked(candidate2))
+        self.assertTrue(is_auth_candidate_blocked(candidate2))
 
     def test_codex_limit_headers_block_only_exhausted_candidate(self):
         candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}

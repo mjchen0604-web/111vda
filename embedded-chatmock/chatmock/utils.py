@@ -880,6 +880,19 @@ def _remove_label_state(label: str) -> None:
         _AUTH_POOL_STATE.pop(label, None)
 
 
+def _account_state_key(account_id: str) -> str:
+    normalized = str(account_id or "").strip()
+    return f"account::{normalized}" if normalized else ""
+
+
+def _remove_account_state(account_id: str) -> None:
+    key = _account_state_key(account_id)
+    if not key:
+        return
+    with _AUTH_POOL_STATE_LOCK:
+        _AUTH_POOL_STATE.pop(key, None)
+
+
 def _mark_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> None:
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip():
@@ -900,24 +913,24 @@ def _is_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> bool
 
 
 def _set_account_cooldown(*, account_id: str = "", until_ts: float = 0.0) -> None:
-    label = str(account_id or "").strip()
-    if not label:
+    key = _account_state_key(account_id)
+    if not key:
         return
     with _AUTH_POOL_STATE_LOCK:
-        state = dict(_AUTH_POOL_STATE.get(label) or {})
+        state = dict(_AUTH_POOL_STATE.get(key) or {})
         state["cooldown_until"] = float(until_ts) if until_ts > 0 else 0.0
-        _AUTH_POOL_STATE[label] = state
+        _AUTH_POOL_STATE[key] = state
 
 
 def _get_account_cooldown(account_id: str) -> float:
-    label = str(account_id or "").strip()
-    if not label:
+    key = _account_state_key(account_id)
+    if not key:
         return 0.0
     with _AUTH_POOL_STATE_LOCK:
-        until_ts = float((_AUTH_POOL_STATE.get(label) or {}).get("cooldown_until") or 0.0)
+        until_ts = float((_AUTH_POOL_STATE.get(key) or {}).get("cooldown_until") or 0.0)
     now = time.time()
     if until_ts <= now:
-        _set_account_cooldown(account_id=label, until_ts=0.0)
+        _set_account_cooldown(account_id=account_id, until_ts=0.0)
         return 0.0
     return until_ts
 
@@ -1005,8 +1018,11 @@ def is_auth_candidate_blocked(candidate: Dict[str, Any]) -> bool:
     account_id = str(candidate.get("account_id") or "").strip()
     if _is_invalid_auth_candidate(label=label, account_id=account_id):
         return True
-    cooldown_until = _get_account_cooldown(label)
+    cooldown_until = _get_cooldown_until(label)
     if cooldown_until > time.time():
+        return True
+    account_cooldown_until = _get_account_cooldown(account_id)
+    if account_cooldown_until > time.time():
         return True
     codex_cooldown_until = _get_candidate_rate_limit_cooldown(label)
     if codex_cooldown_until > time.time():
@@ -1275,7 +1291,7 @@ def _dedupe_candidates_by_account_id(candidates: List[Dict[str, Any]]) -> List[D
         label = str(candidate.get("label") or "").strip()
         account_id = str(candidate.get("account_id") or "").strip()
         source_path = str(candidate.get("source_path") or candidate.get("auth_path") or "").strip()
-        dedupe_key = source_path or label or account_id
+        dedupe_key = account_id or source_path or label
         if not dedupe_key:
             continue
         if dedupe_key in seen_entries or label in seen_labels:
@@ -1538,8 +1554,9 @@ def _apply_account_cooldown(candidates: List[Dict[str, Any]]) -> List[Dict[str, 
     now = time.time()
     available: List[Dict[str, Any]] = []
     for candidate in candidates:
-        label = candidate.get("label") or ""
-        cooldown_until = _get_cooldown_until(label)
+        label = str(candidate.get("label") or "").strip()
+        account_id = str(candidate.get("account_id") or "").strip()
+        cooldown_until = max(_get_cooldown_until(label), _get_account_cooldown(account_id))
         if cooldown_until <= now:
             available.append(candidate)
     if available:
@@ -1569,6 +1586,8 @@ def mark_chatgpt_auth_result(
         if success:
             effective_success_status = status_code if isinstance(status_code, int) and 200 <= status_code < 400 else 200
             _clear_invalid_auth_candidate(label=label)
+            if account_id:
+                _set_account_cooldown(account_id=account_id, until_ts=0.0)
             _set_auth_pool_state(
                 label,
                 status="ready",
@@ -1628,6 +1647,8 @@ def mark_chatgpt_auth_result(
             raw_code=raw_code,
             raw_message=raw_message,
         )
+        if account_id and category in ("insufficient_balance", "rate_limited"):
+            _set_account_cooldown(account_id=account_id, until_ts=cooldown_until)
 
 
 def handle_chatgpt_candidate_failure(candidate: Dict[str, Any], info: Dict[str, Any]) -> str:
@@ -1727,6 +1748,19 @@ def _state_for_label(label: str) -> Dict[str, Any]:
     }
 
 
+def _state_for_candidate(label: str, account_id: str | None = None) -> Dict[str, Any]:
+    state = _state_for_label(label)
+    account_cooldown_until = _get_account_cooldown(str(account_id or "").strip())
+    if account_cooldown_until > float(state.get("cooldown_until") or 0.0):
+        now = time.time()
+        state["cooldown_until"] = account_cooldown_until
+        state["cooldown_remaining"] = max(0, int(account_cooldown_until - now))
+        state["unlock_at"] = datetime.datetime.fromtimestamp(account_cooldown_until, datetime.timezone.utc).isoformat()
+        if not state.get("last_classification"):
+            state["last_classification"] = "rate_limited"
+    return state
+
+
 def _auth_record_from_obj(
     auth_obj: Dict[str, Any],
     *,
@@ -1736,7 +1770,7 @@ def _auth_record_from_obj(
     access_token, account_id, id_token, refresh_token, last_refresh = _extract_tokens_from_auth_obj(auth_obj)
     if not isinstance(account_id, str) or not account_id:
         account_id = _derive_account_id(id_token)
-    state = _state_for_label(label)
+    state = _state_for_candidate(label, account_id)
     id_claims = parse_jwt_claims(id_token) or {}
     access_claims = parse_jwt_claims(access_token) or {}
     plan_raw = (access_claims.get("https://api.openai.com/auth") or {}).get("chatgpt_plan_type") or ""
@@ -1831,7 +1865,7 @@ def _runtime_candidate_record(candidate: Dict[str, Any], records_by_label: Dict[
         "has_refresh_token": bool(record.get("has_refresh_token")),
         "has_id_token": bool(record.get("has_id_token")),
         "sticky_bound": False,
-        **_state_for_label(label),
+        **_state_for_candidate(label, account_id),
     }
     with _AUTH_SESSION_STICKY_LOCK:
         _prune_chatgpt_auth_session_bindings()
