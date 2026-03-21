@@ -10,7 +10,12 @@ sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.routes_dashboard import _merge_payload_settings
 from chatmock.routes_openai import _instructions_for_model, _resolve_bridge_instructions, _resolve_web_search_mode
-from chatmock.upstream import normalize_model_name, resolve_upstream_mode
+from chatmock.upstream import (
+    _build_invalid_request_retry_payloads,
+    _is_generic_invalid_request,
+    normalize_model_name,
+    resolve_upstream_mode,
+)
 
 
 class UpstreamRoutingTests(unittest.TestCase):
@@ -76,6 +81,32 @@ class UpstreamRoutingTests(unittest.TestCase):
         }
         merged = _merge_payload_settings({"enableWebSearch": True}, current)
         self.assertFalse(merged["enableWebSearch"])
+
+    def test_invalid_request_fallback_payloads_strip_optional_fields_progressively(self):
+        payload = {
+            "model": "gpt-5.4",
+            "previous_response_id": "resp_123",
+            "include": ["reasoning.encrypted_content", "other"],
+            "service_tier": "priority",
+            "parallel_tool_calls": True,
+            "tool_choice": {"type": "function", "name": "tool_1"},
+        }
+        variants = _build_invalid_request_retry_payloads(payload)
+        self.assertGreaterEqual(len(variants), 4)
+        self.assertNotIn("previous_response_id", variants[0])
+        self.assertEqual(variants[1].get("include"), ["other"])
+        self.assertNotIn("service_tier", variants[2])
+        self.assertFalse(variants[3].get("parallel_tool_calls"))
+        self.assertEqual(variants[-1].get("tool_choice"), "auto")
+
+    def test_generic_invalid_request_detector_accepts_sanitized_400(self):
+        info = {
+            "raw_status": 400,
+            "raw_code": "",
+            "raw_message": "Invalid request",
+            "raw_body": {"error": {"message": "Invalid request", "type": "invalid_request_error", "param": "", "code": None}},
+        }
+        self.assertTrue(_is_generic_invalid_request(info))
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from .upstream_errors import (
     build_error_info,
     build_openai_error_response,
     error_info_from_http_response,
+    normalized_error_payload,
 )
 from .utils import (
     ManagedAuthUpstream,
@@ -76,6 +77,114 @@ def normalize_model_name(name: str | None, debug_model: str | None = None) -> st
         "gpt-5.1-codex-mini": "gpt-5.1-codex-mini",
     }
     return mapping.get(base, base or "gpt-5")
+
+
+def _is_generic_invalid_request(error_info: Dict[str, Any] | None) -> bool:
+    if not isinstance(error_info, dict):
+        return False
+    if int(error_info.get("raw_status") or 0) != 400:
+        return False
+    normalized = normalized_error_payload(error_info)
+    if str(normalized.get("type") or "").strip().lower() != "invalid_request_error":
+        return False
+    raw_code = str(error_info.get("raw_code") or "").strip().lower()
+    if raw_code not in ("", "invalid_request", "invalid_request_error", "bad_request"):
+        return False
+    raw_message = str(error_info.get("raw_message") or "").strip().lower()
+    normalized_message = str(normalized.get("message") or "").strip().lower()
+    return "invalid request" in raw_message or normalized_message == "invalid request"
+
+
+def _build_invalid_request_retry_payloads(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    variants: List[Dict[str, Any]] = []
+    if not isinstance(payload, dict):
+        return variants
+
+    def _clone(current: Dict[str, Any]) -> Dict[str, Any]:
+        return json.loads(json.dumps(current, ensure_ascii=False))
+
+    def _append(candidate: Dict[str, Any]) -> None:
+        if candidate == payload:
+            return
+        if variants and candidate == variants[-1]:
+            return
+        variants.append(candidate)
+
+    current = _clone(payload)
+    if current.pop("previous_response_id", None) is not None:
+        _append(_clone(current))
+    include = current.get("include")
+    if isinstance(include, list):
+        filtered_include = [item for item in include if item != "reasoning.encrypted_content"]
+        if filtered_include != include:
+            if filtered_include:
+                current["include"] = filtered_include
+            else:
+                current.pop("include", None)
+            _append(_clone(current))
+    if current.pop("service_tier", None) is not None:
+        _append(_clone(current))
+    if current.get("parallel_tool_calls") is True:
+        current["parallel_tool_calls"] = False
+        _append(_clone(current))
+    tool_choice = current.get("tool_choice")
+    if isinstance(tool_choice, dict):
+        current["tool_choice"] = "auto"
+        _append(_clone(current))
+    elif isinstance(tool_choice, str) and tool_choice.strip().lower() not in ("", "auto", "none"):
+        current["tool_choice"] = "auto"
+        _append(_clone(current))
+    return variants
+
+
+def _post_with_invalid_request_fallback(
+    request_callable,
+    *,
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    verbose: bool,
+):
+    current_payload = payload
+    upstream = request_callable(
+        url,
+        headers=headers,
+        json=current_payload,
+        stream=True,
+        timeout=(
+            _UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+            _UPSTREAM_READ_TIMEOUT_SECONDS,
+        ),
+    )
+    error_info = error_info_from_http_response("upstream", "http", upstream)
+    if upstream.status_code < 400 or not _is_generic_invalid_request(error_info):
+        return upstream, current_payload
+
+    for retry_payload in _build_invalid_request_retry_payloads(current_payload):
+        if verbose:
+            try:
+                _log_json("OUTBOUND >> ChatGPT Responses API invalid_request retry payload", retry_payload)
+            except Exception:
+                pass
+        try:
+            upstream.close()
+        except Exception:
+            pass
+        current_payload = retry_payload
+        upstream = request_callable(
+            url,
+            headers=headers,
+            json=current_payload,
+            stream=True,
+            timeout=(
+                _UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+                _UPSTREAM_READ_TIMEOUT_SECONDS,
+            ),
+        )
+        error_info = error_info_from_http_response("upstream", "http", upstream)
+        if upstream.status_code < 400 or not _is_generic_invalid_request(error_info):
+            return upstream, current_payload
+    return upstream, current_payload
 
 
 def _normalize_service_tier(service_tier: str | None) -> str | None:
@@ -255,15 +364,12 @@ def _start_chatgpt_backend_request(
             try:
                 slot_id, session_client = acquire_chatgpt_connection_slot(candidate, session_id)
                 request_callable = session_client.post if isinstance(session_client, requests.Session) else requests.post
-                upstream = request_callable(
-                    CHATGPT_RESPONSES_URL,
+                upstream, responses_payload = _post_with_invalid_request_fallback(
+                    request_callable,
+                    url=CHATGPT_RESPONSES_URL,
                     headers=headers,
-                    json=responses_payload,
-                    stream=True,
-                    timeout=(
-                        _UPSTREAM_CONNECT_TIMEOUT_SECONDS,
-                        _UPSTREAM_READ_TIMEOUT_SECONDS,
-                    ),
+                    payload=responses_payload,
+                    verbose=verbose,
                 )
             except requests.RequestException as exc:
                 last_exception = exc
