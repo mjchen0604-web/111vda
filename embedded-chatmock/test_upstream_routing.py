@@ -9,6 +9,8 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.routes_dashboard import _merge_payload_settings
+from chatmock.routes_anthropic import _instructions_for_model as _anthropic_instructions_for_model
+from chatmock.routes_ollama import _instructions_for_model as _ollama_instructions_for_model
 from chatmock.routes_openai import _instructions_for_model, _resolve_bridge_instructions, _resolve_web_search_mode
 from chatmock.upstream_errors import extract_retry_after_unlock_ts
 from chatmock.upstream import (
@@ -45,13 +47,15 @@ class UpstreamRoutingTests(unittest.TestCase):
         self.assertEqual(resolve_upstream_mode("auto", "gpt-5.4-fast-low", None), "chatgpt-backend")
         self.assertEqual(resolve_upstream_mode("auto", "gpt-5.4", "flex"), "chatgpt-backend")
 
-    def test_gpt54_family_uses_base_instructions(self):
+    def test_gpt54_family_uses_codex_instructions(self):
         app = Flask(__name__)
         app.config["BASE_INSTRUCTIONS"] = "base-template"
         app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
         with app.app_context():
-            self.assertEqual(_instructions_for_model("gpt-5.4"), "base-template")
-            self.assertEqual(_instructions_for_model("gpt-5.4-fast"), "base-template")
+            self.assertEqual(_instructions_for_model("gpt-5.4"), "codex-template")
+            self.assertEqual(_instructions_for_model("gpt-5.4-fast"), "codex-template")
+            self.assertEqual(_anthropic_instructions_for_model("gpt-5.4-high"), "codex-template")
+            self.assertEqual(_ollama_instructions_for_model("gpt-5.4-fast-xhigh"), "codex-template")
             self.assertEqual(_instructions_for_model("gpt-5-codex"), "codex-template")
 
     def test_native_prompt_mode_can_produce_empty_template(self):
@@ -59,7 +63,7 @@ class UpstreamRoutingTests(unittest.TestCase):
         app.config["BASE_INSTRUCTIONS"] = "base-template"
         app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
         with app.app_context():
-            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", {}), "base-template")
+            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", {}), "codex-template")
             self.assertEqual(_resolve_bridge_instructions("gpt-5.4", {"prompt_mode": "native"}), "")
 
     def test_dashboard_settings_force_web_search_off(self):

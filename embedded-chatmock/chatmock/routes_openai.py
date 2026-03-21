@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 from flask import Blueprint, Response, current_app, has_app_context, jsonify, make_response, request
 
-from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS
+from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS, should_use_gpt5_codex_instructions
 from .context_compaction import build_compaction_summary, maybe_compact_input_items
 from .limits import record_rate_limits_from_response
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
@@ -170,7 +170,7 @@ def _log_fast_probe(
 
 def _instructions_for_model(model: str) -> str:
     base = current_app.config.get("BASE_INSTRUCTIONS", BASE_INSTRUCTIONS)
-    if "codex" in (model or "").lower():
+    if should_use_gpt5_codex_instructions(model):
         codex = current_app.config.get("GPT5_CODEX_INSTRUCTIONS") or GPT5_CODEX_INSTRUCTIONS
         if isinstance(codex, str) and codex.strip():
             return codex

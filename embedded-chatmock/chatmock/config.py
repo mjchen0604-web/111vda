@@ -46,3 +46,10 @@ def read_gpt5_codex_instructions(fallback: str) -> str:
 
 BASE_INSTRUCTIONS = read_base_instructions()
 GPT5_CODEX_INSTRUCTIONS = read_gpt5_codex_instructions(BASE_INSTRUCTIONS)
+
+
+def should_use_gpt5_codex_instructions(model: str | None) -> bool:
+    normalized = str(model or "").strip().lower()
+    if not normalized:
+        return False
+    return "codex" in normalized or normalized.startswith("gpt-5.4") or normalized.startswith("gpt5.4")
