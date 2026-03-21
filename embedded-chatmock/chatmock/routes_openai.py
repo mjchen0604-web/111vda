@@ -385,7 +385,6 @@ def _build_responses_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "prompt_cache_retention",
         "safety_identifier",
         "conversation",
-        "store",
         "temperature",
         "top_p",
         "max_tool_calls",
