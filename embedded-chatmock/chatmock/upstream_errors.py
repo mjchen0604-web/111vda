@@ -119,7 +119,9 @@ def extract_retry_after_unlock_ts(info: Mapping[str, Any]) -> float | None:
     match = re.search(r"try again at\s+([^.]+)", haystack, flags=re.IGNORECASE)
     if not match:
         return None
-    raw_value = match.group(1).strip().rstrip(".,;:!?)")
+    raw_value = match.group(1).strip()
+    raw_value = re.split(r"\s+or\s+", raw_value, maxsplit=1, flags=re.IGNORECASE)[0]
+    raw_value = raw_value.strip().rstrip(".,;:!?)")
     cleaned = re.sub(r"(\d{1,2})(st|nd|rd|th)", r"\1", raw_value, flags=re.IGNORECASE)
     local_tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
     for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p"):

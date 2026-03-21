@@ -10,6 +10,7 @@ sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.routes_dashboard import _merge_payload_settings
 from chatmock.routes_openai import _instructions_for_model, _resolve_bridge_instructions, _resolve_web_search_mode
+from chatmock.upstream_errors import extract_retry_after_unlock_ts
 from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
     _is_generic_invalid_request,
@@ -108,6 +109,18 @@ class UpstreamRoutingTests(unittest.TestCase):
             "raw_body": {"error": {"message": "Invalid request", "type": "invalid_request_error", "param": "", "code": None}},
         }
         self.assertTrue(_is_generic_invalid_request(info))
+
+    def test_extract_retry_after_unlock_ts_ignores_upgrade_suffix(self):
+        info = {
+            "raw_status": 429,
+            "raw_message": (
+                "You have reached your included credits usage limit. "
+                "Try again at Mar 21, 2026 9:00 AM or upgrade to Plus to continue using Codex."
+            ),
+            "raw_body": None,
+        }
+        unlock_ts = extract_retry_after_unlock_ts(info)
+        self.assertIsNotNone(unlock_ts)
 
     def test_minimize_responses_payload_drops_unused_defaults(self):
         payload = {
