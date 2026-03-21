@@ -91,7 +91,13 @@ def _log_invalid_request_diagnostic(
         "raw_message": info.get("raw_message"),
         "raw_body": info.get("raw_body"),
     }
-    _log_json(label, compact)
+    try:
+        current_app.logger.warning("%s %s", label, json.dumps(compact, ensure_ascii=False, sort_keys=True))
+    except Exception:
+        try:
+            print(f"{label} {json.dumps(compact, ensure_ascii=False, sort_keys=True)}", flush=True)
+        except Exception:
+            _log_json(label, compact)
 
 
 def _local_invalid_request_info(message: str, *, raw_body: Any = None) -> Dict[str, Any]:
