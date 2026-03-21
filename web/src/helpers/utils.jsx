@@ -753,7 +753,7 @@ export const calculateModelPrice = ({
     const inputRatioBaseMultiplier = modelName.startsWith('gpt-5.4-mini')
       ? 2
       : modelName.startsWith('gpt-5.4')
-        ? 1
+        ? 2
         : 2;
     const inputRatioPriceUSD =
       record.model_ratio * inputRatioBaseMultiplier * usedGroupRatio;
