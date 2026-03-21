@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relayclaude "github.com/QuantumNous/new-api/relay/channel/claude"
@@ -33,6 +34,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	channel.SetupApiRequestHeader(info, c, req)
 	if info != nil && info.ApiKey != "" {
 		req.Set("Authorization", "Bearer "+info.ApiKey)
+	}
+	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
+		req.Set(common.RequestIdKey, requestID)
 	}
 	return nil
 }

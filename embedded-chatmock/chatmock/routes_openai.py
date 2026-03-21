@@ -75,6 +75,7 @@ def _log_invalid_request_diagnostic(
         return
     snapshot = payload if isinstance(payload, dict) else {}
     compact = {
+        "request_id": request.headers.get("X-Oneapi-Request-Id"),
         "model": snapshot.get("model"),
         "prompt_mode": snapshot.get("prompt_mode"),
         "service_tier": snapshot.get("service_tier"),
