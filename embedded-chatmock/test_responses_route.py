@@ -239,7 +239,7 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(body["model"], "gpt-5.4-fast-xhigh")
         self.assertNotIn("service_tier", body)
         self.assertEqual(captured["model"], "gpt-5.4")
-        self.assertEqual(captured["service_tier"], "fast")
+        self.assertEqual(captured["service_tier"], "priority")
         self.assertEqual(captured["reasoning_param"], {"effort": "xhigh", "summary": "auto"})
         self.assertNotIn("max_output_tokens", captured["extra_payload"])
 

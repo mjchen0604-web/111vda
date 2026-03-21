@@ -10,7 +10,7 @@ from flask import Blueprint, Response, current_app, has_app_context, jsonify, ma
 from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS
 from .context_compaction import build_compaction_summary, maybe_compact_input_items
 from .limits import record_rate_limits_from_response
-from .http import build_cors_headers
+from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .responses_session import is_previous_response_not_found, resolve_turn_state, save_response_session
 from .reasoning import (
     allowed_efforts_for_model,
@@ -20,8 +20,6 @@ from .reasoning import (
     extract_service_tier_from_model_name,
     parse_fast_mode,
     public_model_name,
-    public_service_tier_name,
-    presented_service_tier_name,
 )
 from .surface_names import public_upstream_name
 from .upstream_errors import (
@@ -107,8 +105,6 @@ def _log_fast_probe(
         "requested_model": requested_model,
         "normalized_model": normalized_model,
         "selected_path": public_upstream_name(selected_mode),
-        "requested_performance_mode": public_service_tier_name(requested_service_tier),
-        "observed_performance_mode": public_service_tier_name(observed_service_tier),
         "stream": bool(is_stream),
     }
     if upstream is not None:
@@ -159,11 +155,13 @@ def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_t
 def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None = None) -> str | None:
     fast_mode = parse_fast_mode(payload.get("fast_mode"))
     if fast_mode is True:
-        return "fast"
+        return "priority"
     if fast_mode is False:
         return None
     alias_value = extract_service_tier_from_model_name(requested_model)
     if isinstance(alias_value, str) and alias_value:
+        if alias_value == "fast":
+            return "priority"
         return alias_value
     configured = current_app.config.get("SERVICE_TIER")
     if isinstance(configured, str) and configured.strip():
@@ -407,29 +405,6 @@ def _client_metadata_minimization_enabled() -> bool:
     )
 
 
-def _service_tier_exposure_enabled() -> bool:
-    if has_app_context():
-        return bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
-    return (os.getenv("CHATMOCK_EXPOSE_SERVICE_TIER") or "0").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-
-
-def _presented_client_service_tier(
-    requested_service_tier: str | None,
-    observed_service_tier: str | None,
-) -> str | None:
-    if not _service_tier_exposure_enabled():
-        return None
-    presented = presented_service_tier_name(requested_service_tier, observed_service_tier)
-    if presented == "priority":
-        return "priority"
-    return None
-
-
 def _strip_client_visible_metadata(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned: Dict[str, Any] = {}
@@ -458,12 +433,6 @@ def _sanitize_responses_response_obj(
     presented_model = _presented_client_model(requested_model, cleaned.get("model"))
     if presented_model:
         cleaned["model"] = presented_model
-    presented_service_tier = _presented_client_service_tier(
-        requested_service_tier,
-        observed_service_tier,
-    )
-    if presented_service_tier:
-        cleaned["service_tier"] = presented_service_tier
     return cleaned
 
 
@@ -476,10 +445,6 @@ def _sanitize_responses_stream_event(
 ) -> Dict[str, Any]:
     if not metadata_minimization_enabled:
         return evt
-    observed_service_tier = None
-    response_obj = evt.get("response")
-    if isinstance(response_obj, dict) and isinstance(response_obj.get("service_tier"), str):
-        observed_service_tier = response_obj.get("service_tier") or None
     cleaned = _strip_client_visible_metadata(evt)
     if isinstance(cleaned, dict) and isinstance(cleaned.get("response"), dict):
         presented_model = _presented_client_model(
@@ -488,12 +453,6 @@ def _sanitize_responses_stream_event(
         )
         if presented_model:
             cleaned["response"]["model"] = presented_model
-        presented_service_tier = _presented_client_service_tier(
-            requested_service_tier,
-            observed_service_tier,
-        )
-        if presented_service_tier:
-            cleaned["response"]["service_tier"] = presented_service_tier
     return cleaned
 
 
@@ -1003,24 +962,25 @@ def responses() -> Response:
                 return None
             return retry_upstream
 
-        resp = Response(
-            _wrap_stream_logging(
-                "STREAM OUT /v1/responses",
-                _responses_stream_passthrough(
-                    upstream,
-                    requested_model=requested_model,
-                    requested_service_tier=service_tier,
-                    metadata_minimization_enabled=metadata_minimization_enabled,
-                    retry_factory=_retry_without_previous_response if effective_previous_response_id else None,
-                    on_completed=lambda response_obj, completed_upstream: save_response_session(
-                        thread_session,
-                        response_obj=response_obj,
-                        full_input_items=full_input_items,
-                        upstream=completed_upstream,
-                    ),
+        stream_iter = _wrap_stream_logging(
+            "STREAM OUT /v1/responses",
+            _responses_stream_passthrough(
+                upstream,
+                requested_model=requested_model,
+                requested_service_tier=service_tier,
+                metadata_minimization_enabled=metadata_minimization_enabled,
+                retry_factory=_retry_without_previous_response if effective_previous_response_id else None,
+                on_completed=lambda response_obj, completed_upstream: save_response_session(
+                    thread_session,
+                    response_obj=response_obj,
+                    full_input_items=full_input_items,
+                    upstream=completed_upstream,
                 ),
-                verbose,
             ),
+            verbose,
+        )
+        resp = Response(
+            wrap_sse_stream_with_heartbeat(stream_iter),
             status=upstream.status_code,
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -1479,7 +1439,7 @@ def chat_completions() -> Response:
 
         stream_iter = _wrap_stream_logging("STREAM OUT /v1/chat/completions", _retrying_stream(), verbose)
         resp = Response(
-            stream_iter,
+            wrap_sse_stream_with_heartbeat(stream_iter),
             status=upstream.status_code,
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -1567,13 +1527,6 @@ def chat_completions() -> Response:
         ],
         **({"usage": usage_obj} if usage_obj else {}),
     }
-    presented_service_tier = (
-        presented_service_tier_name(service_tier, observed_service_tier)
-        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
-        else None
-    )
-    if presented_service_tier:
-        completion["service_tier"] = presented_service_tier
     if verbose:
         _log_json("OUT POST /v1/chat/completions", completion)
     resp = make_response(jsonify(completion), upstream.status_code)
@@ -1862,7 +1815,7 @@ def completions() -> Response:
         stream_iter = _retrying_text_stream()
         stream_iter = _wrap_stream_logging("STREAM OUT /v1/completions", stream_iter, verbose)
         resp = Response(
-            stream_iter,
+            wrap_sse_stream_with_heartbeat(stream_iter),
             status=upstream.status_code,
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -1941,13 +1894,6 @@ def completions() -> Response:
         ],
         **({"usage": usage_obj} if usage_obj else {}),
     }
-    presented_service_tier = (
-        presented_service_tier_name(service_tier, observed_service_tier)
-        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
-        else None
-    )
-    if presented_service_tier:
-        completion["service_tier"] = presented_service_tier
     if verbose:
         _log_json("OUT POST /v1/completions", completion)
     resp = make_response(jsonify(completion), upstream.status_code)

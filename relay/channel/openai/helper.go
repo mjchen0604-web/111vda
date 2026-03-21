@@ -35,27 +35,19 @@ func rawMessageHasPriorityLikeServiceTier(raw json.RawMessage) bool {
 }
 
 func shouldPresentPriorityServiceTier(info *relaycommon.RelayInfo) bool {
-	if info == nil {
-		return false
-	}
-	if strings.Contains(strings.ToLower(strings.TrimSpace(info.OriginModelName)), "-fast") {
-		return true
-	}
-	switch req := info.Request.(type) {
-	case *dto.GeneralOpenAIRequest:
-		return rawMessageHasPriorityLikeServiceTier(req.ServiceTier)
-	case *dto.OpenAIResponsesRequest:
-		return isPriorityLikeServiceTier(req.ServiceTier)
-	case *dto.ClaudeRequest:
-		return isPriorityLikeServiceTier(req.ServiceTier)
-	default:
-		return false
-	}
+	_ = info
+	return false
 }
 
 func normalizePresentedServiceTier(value string) string {
-	switch strings.TrimSpace(strings.ToLower(value)) {
-	case "", "auto", "default", "fast", "priority":
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	collapsed := strings.ReplaceAll(normalized, " ", "")
+	switch collapsed {
+	case "", "auto":
+		return "auto"
+	case "default":
+		return "default"
+	case "fast", "priority":
 		return "priority"
 	default:
 		return value
@@ -63,34 +55,30 @@ func normalizePresentedServiceTier(value string) string {
 }
 
 func applyPresentedServiceTierToStream(info *relaycommon.RelayInfo, streamResponse *dto.ChatCompletionsStreamResponse) {
-	if streamResponse == nil || !shouldPresentPriorityServiceTier(info) {
+	if streamResponse == nil {
 		return
 	}
-	streamResponse.ServiceTier = normalizePresentedServiceTier(streamResponse.ServiceTier)
+	streamResponse.SystemFingerprint = nil
+	streamResponse.ServiceTier = ""
 }
 
 func applyPresentedServiceTierToChatResponse(info *relaycommon.RelayInfo, chatResponse *dto.OpenAITextResponse) {
-	if chatResponse == nil || !shouldPresentPriorityServiceTier(info) {
+	if chatResponse == nil {
 		return
 	}
-	chatResponse.ServiceTier = normalizePresentedServiceTier(chatResponse.ServiceTier)
+	chatResponse.ServiceTier = ""
 }
 
 func patchServiceTierInOpenAIResponseBody(info *relaycommon.RelayInfo, responseBody []byte) []byte {
-	if !shouldPresentPriorityServiceTier(info) || len(responseBody) == 0 {
+	if len(responseBody) == 0 {
 		return responseBody
 	}
 	var bodyMap map[string]any
 	if err := common.Unmarshal(responseBody, &bodyMap); err != nil {
 		return responseBody
 	}
-	currentTier := strings.TrimSpace(strings.ToLower(common.Interface2String(bodyMap["service_tier"])))
-	switch currentTier {
-	case "", "auto", "default", "fast", "priority":
-		bodyMap["service_tier"] = "priority"
-	default:
-		return responseBody
-	}
+	delete(bodyMap, "system_fingerprint")
+	delete(bodyMap, "service_tier")
 	patched, err := common.Marshal(bodyMap)
 	if err != nil {
 		return responseBody
@@ -282,7 +270,6 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 	case types.RelayFormatOpenAI:
 		if info.ShouldIncludeUsage && !containStreamUsage {
 			response := helper.GenerateFinalUsageResponse(responseId, createAt, model, *usage)
-			response.SetSystemFingerprint(systemFingerprint)
 			helper.ObjectData(c, response)
 		}
 		helper.Done(c)

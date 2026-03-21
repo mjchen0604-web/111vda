@@ -31,6 +31,9 @@ from .utils import (
     mark_chatgpt_auth_result,
 )
 
+_UPSTREAM_CONNECT_TIMEOUT_SECONDS = 30
+_UPSTREAM_READ_TIMEOUT_SECONDS = 3600
+
 
 def _log_json(prefix: str, payload: Any) -> None:
     try:
@@ -257,7 +260,10 @@ def _start_chatgpt_backend_request(
                     headers=headers,
                     json=responses_payload,
                     stream=True,
-                    timeout=600,
+                    timeout=(
+                        _UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+                        _UPSTREAM_READ_TIMEOUT_SECONDS,
+                    ),
                 )
             except requests.RequestException as exc:
                 last_exception = exc

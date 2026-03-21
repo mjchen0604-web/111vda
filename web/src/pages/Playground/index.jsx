@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Layout, Toast } from '@douyinfe/semi-ui';
@@ -105,6 +105,11 @@ const Playground = () => {
     debugVisibility: 'off',
     customRequestVisibility: 'off',
   });
+  const hasAppliedRemoteDefaultsRef = useRef(false);
+  const latestPlaygroundConfigRef = useRef({
+    inputs: null,
+    parameterEnabled: null,
+  });
 
   const state = usePlaygroundState();
   const {
@@ -132,6 +137,13 @@ const Playground = () => {
     setMessage,
   } = state;
 
+  useEffect(() => {
+    latestPlaygroundConfigRef.current = {
+      inputs,
+      parameterEnabled,
+    };
+  }, [inputs, parameterEnabled]);
+
   const { sendRequest, onStopGenerator } = useApiRequest(
     setMessage,
     setDebugData,
@@ -154,7 +166,10 @@ const Playground = () => {
       if (!success) {
         throw new Error(apiMessage || 'failed to load playground config');
       }
-      applyRemoteDefaults(data || {}, isAdminUser);
+      if (!hasAppliedRemoteDefaultsRef.current) {
+        applyRemoteDefaults(data || {}, isAdminUser);
+        hasAppliedRemoteDefaultsRef.current = true;
+      }
       setApplyPromptToRealAPI(Boolean(data?.applyPromptToRealAPI));
       setApplyModelConfigToRealAPI(Boolean(data?.applyModelConfigToRealAPI));
       setDebugData((prev) => ({
@@ -171,6 +186,26 @@ const Playground = () => {
       showError(error);
     }
   }, [applyRemoteDefaults, isAdminUser]);
+
+  const savePersonalDefaultsSnapshot = useCallback(
+    async (
+      nextInputs = latestPlaygroundConfigRef.current.inputs,
+      nextParameterEnabled = latestPlaygroundConfigRef.current.parameterEnabled,
+    ) => {
+      const res = await API.post('/api/playground/config/defaults', {
+        scope: 'personal',
+        config: {
+          inputs: nextInputs,
+          parameterEnabled: nextParameterEnabled,
+        },
+      });
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || 'save failed');
+      }
+      await loadPlaygroundConfig();
+    },
+    [loadPlaygroundConfig],
+  );
 
   const savePersonalDefaults = useCallback(async () => {
     const res = await API.post('/api/playground/config/defaults', {
@@ -190,7 +225,7 @@ const Playground = () => {
     async (enabled) => {
       try {
         if (enabled) {
-          await savePersonalDefaults();
+          await savePersonalDefaultsSnapshot();
         }
         const res = await API.post('/api/playground/config/apply', {
           scope: 'personal',
@@ -209,14 +244,14 @@ const Playground = () => {
         showError(error);
       }
     },
-    [savePersonalDefaults],
+    [savePersonalDefaultsSnapshot],
   );
 
   const saveApplyModelConfigToRealAPI = useCallback(
     async (enabled) => {
       try {
         if (enabled) {
-          await savePersonalDefaults();
+          await savePersonalDefaultsSnapshot();
         }
         const res = await API.post('/api/playground/config/apply', {
           scope: 'personal',
@@ -236,7 +271,7 @@ const Playground = () => {
         showError(error);
       }
     },
-    [savePersonalDefaults],
+    [savePersonalDefaultsSnapshot],
   );
 
   const handlePromptModeChange = useCallback(
@@ -246,26 +281,21 @@ const Playground = () => {
         promptMode: mode,
         systemPrompt: mode === 'default' ? '' : inputs.systemPrompt,
       };
+      latestPlaygroundConfigRef.current = {
+        inputs: nextInputs,
+        parameterEnabled,
+      };
       setInputs(nextInputs);
       if (applyPromptToRealAPI) {
         try {
-          const res = await API.post('/api/playground/config/defaults', {
-            scope: 'personal',
-            config: {
-              inputs: nextInputs,
-              parameterEnabled,
-            },
-          });
-          if (!res.data?.success) {
-            throw new Error(res.data?.message || 'save failed');
-          }
+          await savePersonalDefaultsSnapshot(nextInputs, parameterEnabled);
           showSuccess('已保存');
         } catch (error) {
           showError(error);
         }
       }
     },
-    [applyPromptToRealAPI, inputs, parameterEnabled, setInputs],
+    [applyPromptToRealAPI, inputs, parameterEnabled, savePersonalDefaultsSnapshot, setInputs],
   );
 
   const handleAdminGlobalPromptPreset = useCallback(

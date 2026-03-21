@@ -29,7 +29,6 @@ def split_model_alias(model: str | None) -> tuple[str, str | None, str | None]:
 
     effort: str | None = None
     service_tier: str | None = None
-
     if ":" in base:
         maybe = base.rsplit(":", 1)[-1].strip()
         if maybe in MODEL_REASONING_EFFORTS:

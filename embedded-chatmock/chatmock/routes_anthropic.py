@@ -8,7 +8,7 @@ from flask import Blueprint, Response, current_app, jsonify, make_response, requ
 
 from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS
 from .context_compaction import maybe_compact_input_items
-from .http import build_cors_headers
+from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .limits import record_rate_limits_from_response
 from .responses_session import is_previous_response_not_found, resolve_turn_state, save_response_session
 from .reasoning import (
@@ -16,7 +16,6 @@ from .reasoning import (
     build_reasoning_param,
     extract_reasoning_from_model_name,
     extract_service_tier_from_model_name,
-    presented_service_tier_name,
 )
 from .upstream_errors import (
     build_anthropic_error_response,
@@ -84,6 +83,8 @@ def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_t
 def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None = None) -> str | None:
     alias_value = extract_service_tier_from_model_name(requested_model)
     if isinstance(alias_value, str) and alias_value:
+        if alias_value == "fast":
+            return "priority"
         return alias_value
     configured = current_app.config.get("SERVICE_TIER")
     if isinstance(configured, str) and configured.strip():
@@ -194,6 +195,36 @@ def _safe_json_object(raw: Any) -> Dict[str, Any]:
         return {"raw": raw}
 
 
+def _fallback_block_text(block: Dict[str, Any]) -> str:
+    if not isinstance(block, dict):
+        return ""
+    block_type = str(block.get("type") or "").strip().lower()
+    if block_type == "thinking":
+        text = block.get("thinking") or block.get("text")
+        return str(text).strip() if isinstance(text, str) and str(text).strip() else ""
+    if block_type == "redacted_thinking":
+        data = block.get("data")
+        if isinstance(data, str) and data.strip():
+            return f"[redacted_thinking]{data.strip()}"
+        return "[redacted_thinking]"
+    if block_type == "document":
+        title = block.get("title")
+        if isinstance(title, str) and title.strip():
+            return f"[document:{title.strip()}]"
+        source = block.get("source")
+        if isinstance(source, dict):
+            media_type = source.get("media_type")
+            if isinstance(media_type, str) and media_type.strip():
+                return f"[document:{media_type.strip()}]"
+        return "[document]"
+    if block_type:
+        try:
+            return json.dumps(block, ensure_ascii=False)
+        except Exception:
+            return f"[{block_type}]"
+    return ""
+
+
 def _flush_message_input(input_items: List[Dict[str, Any]], role: str, content_items: List[Dict[str, Any]]) -> None:
     if not content_items:
         return
@@ -216,8 +247,9 @@ def _convert_anthropic_messages_to_input(messages: Any) -> tuple[List[Dict[str, 
         if not isinstance(msg, dict):
             return None, f"messages[{idx}] must be an object"
         role = msg.get("role")
-        if role not in ("user", "assistant"):
-            return None, f"messages[{idx}].role must be 'user' or 'assistant'"
+        if role not in ("user", "assistant", "system"):
+            return None, f"messages[{idx}].role must be 'user', 'assistant', or 'system'"
+        normalized_role = "user" if role == "system" else role
 
         content = msg.get("content")
         blocks: List[Dict[str, Any]] = []
@@ -235,12 +267,12 @@ def _convert_anthropic_messages_to_input(messages: Any) -> tuple[List[Dict[str, 
                 text = block.get("text")
                 if isinstance(text, str) and text:
                     pending_content_items.append(
-                        {"type": ("output_text" if role == "assistant" else "input_text"), "text": text}
+                        {"type": ("output_text" if normalized_role == "assistant" else "input_text"), "text": text}
                     )
                 continue
 
             if block_type == "image":
-                if role != "user":
+                if normalized_role != "user":
                     return None, f"messages[{idx}] image blocks are only supported for user role"
                 url = _image_source_to_url(block.get("source"))
                 if not url:
@@ -249,9 +281,9 @@ def _convert_anthropic_messages_to_input(messages: Any) -> tuple[List[Dict[str, 
                 continue
 
             if block_type == "tool_use":
-                if role != "assistant":
+                if normalized_role != "assistant":
                     return None, f"messages[{idx}] tool_use blocks are only supported for assistant role"
-                _flush_message_input(input_items, role, pending_content_items)
+                _flush_message_input(input_items, normalized_role, pending_content_items)
                 call_id = block.get("id")
                 name = block.get("name")
                 if not isinstance(call_id, str) or not call_id:
@@ -273,9 +305,9 @@ def _convert_anthropic_messages_to_input(messages: Any) -> tuple[List[Dict[str, 
                 continue
 
             if block_type == "tool_result":
-                if role != "user":
+                if normalized_role != "user":
                     return None, f"messages[{idx}] tool_result blocks are only supported for user role"
-                _flush_message_input(input_items, role, pending_content_items)
+                _flush_message_input(input_items, normalized_role, pending_content_items)
                 call_id = block.get("tool_use_id")
                 if not isinstance(call_id, str) or not call_id:
                     return None, f"messages[{idx}] tool_result.tool_use_id must be a non-empty string"
@@ -288,11 +320,20 @@ def _convert_anthropic_messages_to_input(messages: Any) -> tuple[List[Dict[str, 
                 )
                 continue
 
+            fallback_text = _fallback_block_text(block)
+            if fallback_text:
+                pending_content_items.append(
+                    {
+                        "type": ("output_text" if normalized_role == "assistant" else "input_text"),
+                        "text": fallback_text,
+                    }
+                )
+                continue
             if isinstance(block_type, str) and block_type:
-                return None, f"unsupported content block type: {block_type}"
+                continue
             return None, f"messages[{idx}] includes invalid content block"
 
-        _flush_message_input(input_items, role, pending_content_items)
+        _flush_message_input(input_items, normalized_role, pending_content_items)
 
     return input_items, None
 
@@ -617,13 +658,6 @@ def _build_anthropic_message_response(
         "stop_sequence": None,
         "usage": usage_obj or {"input_tokens": 0, "output_tokens": 0},
     }
-    presented_service_tier = (
-        presented_service_tier_name(service_tier, observed_service_tier)
-        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
-        else None
-    )
-    if presented_service_tier:
-        message_obj["service_tier"] = presented_service_tier
     return message_obj
 
 
@@ -919,7 +953,7 @@ def messages() -> Response:
                     return
 
         resp = Response(
-            _retrying_stream(),
+            wrap_sse_stream_with_heartbeat(_retrying_stream()),
             status=upstream.status_code,
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},

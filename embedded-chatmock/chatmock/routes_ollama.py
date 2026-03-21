@@ -20,7 +20,6 @@ from .reasoning import (
     normalize_reasoning_compat,
     parse_fast_mode,
     public_model_name,
-    presented_service_tier_name,
 )
 from .transform import convert_ollama_messages, normalize_ollama_tools
 from .thread_sessions import resolve_thread_session_state
@@ -123,11 +122,13 @@ def _upstream_attempt_limit(is_stream: bool, model: str | None = None, service_t
 def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None = None) -> str | None:
     fast_mode = parse_fast_mode(payload.get("fast_mode"))
     if fast_mode is True:
-        return "fast"
+        return "priority"
     if fast_mode is False:
         return None
     alias_value = extract_service_tier_from_model_name(requested_model)
     if isinstance(alias_value, str) and alias_value:
+        if alias_value == "fast":
+            return "priority"
         return alias_value
     configured = current_app.config.get("SERVICE_TIER")
     if isinstance(configured, str) and configured.strip():
@@ -984,13 +985,6 @@ def ollama_chat() -> Response:
         "done": True,
         "done_reason": "tool_calls" if tool_calls else "stop",
     }
-    presented_service_tier = (
-        presented_service_tier_name(service_tier, observed_service_tier)
-        if bool(current_app.config.get("EXPOSE_SERVICE_TIER", False))
-        else None
-    )
-    if presented_service_tier:
-        out_json["service_tier"] = presented_service_tier
     out_json.update(_OLLAMA_FAKE_EVAL)
     if verbose:
         _log_json("OUT POST /api/chat", out_json)
