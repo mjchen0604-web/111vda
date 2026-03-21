@@ -1274,7 +1274,9 @@ function renderDisplayAmountFromUsd(usdAmount, digits = 6) {
 
 function getOpenAIInputBaseMultiplier(modelName = '', longContextMultiplier = 1) {
   const normalizedModelName = String(modelName || '').toLowerCase();
-  const baseMultiplier = normalizedModelName.startsWith('gpt-5.4-mini')
+  const baseMultiplier = normalizedModelName.startsWith('gpt-5.4-fast')
+    ? 2
+    : normalizedModelName.startsWith('gpt-5.4-mini')
     ? 2
     : normalizedModelName.startsWith('gpt-5.4')
       ? 1
