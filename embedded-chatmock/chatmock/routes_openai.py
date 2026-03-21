@@ -311,6 +311,68 @@ def _should_retry_nonstream_candidate(error_info: Dict[str, Any] | None) -> bool
 
 
 def _normalize_responses_input(payload: Dict[str, Any]) -> tuple[List[Dict[str, Any]] | None, str | None]:
+    def _extract_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            for key in ("text", "content"):
+                candidate = value.get(key)
+                if isinstance(candidate, str):
+                    return candidate
+        return ""
+
+    def _stringify_output(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            texts: List[str] = []
+            for part in value:
+                text = _extract_text(part)
+                if text:
+                    texts.append(text)
+            if texts:
+                return "\n".join(texts)
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+
+    def _normalize_message_item(item: Dict[str, Any], idx: int) -> tuple[Dict[str, Any] | None, str | None]:
+        role = str(item.get("role") or "").strip().lower()
+        if role not in ("user", "assistant", "system", "developer"):
+            return None, f"input[{idx}].role must be user/assistant/system/developer"
+        normalized_role = "assistant" if role == "assistant" else "user"
+        raw_content = item.get("content")
+        normalized_parts: List[Dict[str, Any]] = []
+        if isinstance(raw_content, str):
+            if raw_content:
+                normalized_parts.append(
+                    {"type": "output_text" if normalized_role == "assistant" else "input_text", "text": raw_content}
+                )
+        elif isinstance(raw_content, list):
+            for part in raw_content:
+                if not isinstance(part, dict):
+                    continue
+                part_type = str(part.get("type") or "").strip()
+                if part_type in ("text", "input_text", "output_text", "summary_text"):
+                    text = _extract_text(part)
+                    if text:
+                        normalized_parts.append(
+                            {
+                                "type": "output_text" if normalized_role == "assistant" else "input_text",
+                                "text": text,
+                            }
+                        )
+                elif part_type in ("input_image", "image_url", "input_file", "input_audio"):
+                    normalized_parts.append(dict(part))
+        if not normalized_parts:
+            return None, f"input[{idx}].content must contain at least one supported part"
+        return {
+            "type": "message",
+            "role": normalized_role,
+            "content": normalized_parts,
+        }, None
+
     raw_input = payload.get("input")
     if isinstance(raw_input, str):
         return [
@@ -329,8 +391,33 @@ def _normalize_responses_input(payload: Dict[str, Any]) -> tuple[List[Dict[str, 
             return None, f"input[{idx}] must be an object"
         item_copy = dict(item)
         item_copy.pop("id", None)
-        if item_copy.get("type") == "function_call" and isinstance(item_copy.get("name"), str):
-            item_copy["name"] = sanitize_reserved_tool_name(item_copy.get("name"))
+        item_copy.pop("status", None)
+        item_type = str(item_copy.get("type") or "").strip()
+        if not item_type and item_copy.get("role") is not None:
+            normalized_message, err = _normalize_message_item(item_copy, idx)
+            if err:
+                return None, err
+            if normalized_message is not None:
+                normalized.append(normalized_message)
+            continue
+        if item_type == "message":
+            normalized_message, err = _normalize_message_item(item_copy, idx)
+            if err:
+                return None, err
+            if normalized_message is not None:
+                normalized.append(normalized_message)
+            continue
+        if item_type == "reasoning":
+            continue
+        if item_type == "function_call":
+            if isinstance(item_copy.get("name"), str):
+                item_copy["name"] = sanitize_reserved_tool_name(item_copy.get("name"))
+            normalized.append(item_copy)
+            continue
+        if item_type == "function_call_output":
+            item_copy["output"] = _stringify_output(item_copy.get("output"))
+            normalized.append(item_copy)
+            continue
         normalized.append(item_copy)
     normalized = prepare_upstream_input_items(
         normalized,

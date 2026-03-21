@@ -326,12 +326,15 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(captured["model"], "gpt-5.4")
         self.assertEqual(captured["service_tier"], "priority")
         self.assertEqual(len(captured["input_items"]), 2)
+        self.assertEqual(captured["input_items"][0]["type"], "message")
         self.assertEqual(captured["input_items"][0]["role"], "user")
+        self.assertEqual(captured["input_items"][0]["content"][0]["type"], "input_text")
         self.assertEqual(captured["input_items"][1]["type"], "message")
         self.assertIn("[tool_result:call_123]", captured["input_items"][1]["content"][0]["text"])
         self.assertNotIn("previous_response_id", captured["extra_payload"])
         self.assertNotIn("conversation", captured["extra_payload"])
         self.assertNotIn("prompt_cache_key", captured["extra_payload"])
+        self.assertNotIn("instructions", captured["extra_payload"])
 
     def test_v1_responses_compact_returns_local_summary(self):
         resp = self.client.post(
