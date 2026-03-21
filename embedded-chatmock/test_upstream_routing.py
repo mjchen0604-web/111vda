@@ -13,6 +13,7 @@ from chatmock.routes_openai import _instructions_for_model, _resolve_bridge_inst
 from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
     _is_generic_invalid_request,
+    _minimize_responses_payload,
     normalize_model_name,
     resolve_upstream_mode,
 )
@@ -107,6 +108,20 @@ class UpstreamRoutingTests(unittest.TestCase):
             "raw_body": {"error": {"message": "Invalid request", "type": "invalid_request_error", "param": "", "code": None}},
         }
         self.assertTrue(_is_generic_invalid_request(info))
+
+    def test_minimize_responses_payload_drops_unused_defaults(self):
+        payload = {
+            "model": "gpt-5.4",
+            "instructions": "",
+            "tools": [],
+            "tool_choice": "auto",
+            "parallel_tool_calls": False,
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": "sess_123",
+        }
+        minimized = _minimize_responses_payload(payload)
+        self.assertEqual(minimized, {"model": "gpt-5.4", "prompt_cache_key": "sess_123"})
 
 
 if __name__ == "__main__":

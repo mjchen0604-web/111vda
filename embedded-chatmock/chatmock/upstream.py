@@ -137,6 +137,39 @@ def _build_invalid_request_retry_payloads(payload: Dict[str, Any]) -> List[Dict[
     return variants
 
 
+def _minimize_responses_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return payload
+    minimized = json.loads(json.dumps(payload, ensure_ascii=False))
+
+    instructions = minimized.get("instructions")
+    if not isinstance(instructions, str) or not instructions.strip():
+        minimized.pop("instructions", None)
+
+    include = minimized.get("include")
+    if isinstance(include, list):
+        filtered_include = [item for item in include if item != "reasoning.encrypted_content"]
+        if filtered_include:
+            minimized["include"] = filtered_include
+        else:
+            minimized.pop("include", None)
+
+    tools = minimized.get("tools")
+    if isinstance(tools, list) and len(tools) == 0:
+        minimized.pop("tools", None)
+
+    if minimized.get("tool_choice") == "auto":
+        minimized.pop("tool_choice", None)
+
+    if minimized.get("parallel_tool_calls") is False:
+        minimized.pop("parallel_tool_calls", None)
+
+    if minimized.get("store") is False:
+        minimized.pop("store", None)
+
+    return minimized
+
+
 def _post_with_invalid_request_fallback(
     request_callable,
     *,
@@ -303,6 +336,7 @@ def _start_chatgpt_backend_request(
         responses_payload["service_tier"] = normalized_service_tier
     if not isinstance(responses_payload.get("prompt_cache_key"), str) or not str(responses_payload.get("prompt_cache_key") or "").strip():
         responses_payload["prompt_cache_key"] = session_id
+    responses_payload = _minimize_responses_payload(responses_payload)
     if verbose:
         _log_json("OUTBOUND >> ChatGPT Responses API payload", responses_payload)
 
