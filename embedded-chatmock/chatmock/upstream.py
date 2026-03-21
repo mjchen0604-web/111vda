@@ -95,6 +95,13 @@ def _is_generic_invalid_request(error_info: Dict[str, Any] | None) -> bool:
     return "invalid request" in raw_message or normalized_message == "invalid request"
 
 
+def _is_undefined_text_value(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower()
+    return normalized in ("", "undefined", "[undefined]")
+
+
 def _build_invalid_request_retry_payloads(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     variants: List[Dict[str, Any]] = []
     if not isinstance(payload, dict):
@@ -188,6 +195,19 @@ def _minimize_responses_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     minimized["input"] = _sanitize_orphan_function_call_outputs(minimized.get("input"))
     if minimized.get("input") is None:
         minimized.pop("input", None)
+
+    for key in list(minimized.keys()):
+        value = minimized.get(key)
+        if _is_undefined_text_value(value):
+            minimized.pop(key, None)
+            continue
+        if isinstance(value, list):
+            filtered = [item for item in value if not _is_undefined_text_value(item)]
+            if filtered != value:
+                if filtered:
+                    minimized[key] = filtered
+                else:
+                    minimized.pop(key, None)
 
     instructions = minimized.get("instructions")
     if not isinstance(instructions, str) or not instructions.strip():

@@ -14,6 +14,7 @@ from chatmock.upstream_errors import extract_retry_after_unlock_ts
 from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
     _is_generic_invalid_request,
+    _is_undefined_text_value,
     _minimize_responses_payload,
     _sanitize_orphan_function_call_outputs,
     normalize_model_name,
@@ -167,6 +168,32 @@ class UpstreamRoutingTests(unittest.TestCase):
         ]
         sanitized = _sanitize_orphan_function_call_outputs(items)
         self.assertEqual(sanitized[1]["type"], "function_call_output")
+
+    def test_undefined_text_detector_matches_cherry_sentinels(self):
+        self.assertTrue(_is_undefined_text_value("[undefined]"))
+        self.assertTrue(_is_undefined_text_value("undefined"))
+        self.assertFalse(_is_undefined_text_value("gpt-5.4"))
+
+    def test_minimize_responses_payload_drops_undefined_sentinel_values(self):
+        payload = {
+            "model": "gpt-5.4-fast-xhigh",
+            "conversation": "[undefined]",
+            "previous_response_id": "[undefined]",
+            "prompt_cache_key": "[undefined]",
+            "user": "[undefined]",
+            "instructions": "[undefined]",
+            "service_tier": "[undefined]",
+            "include": ["reasoning.encrypted_content", "[undefined]"],
+            "store": False,
+        }
+        minimized = _minimize_responses_payload(payload)
+        self.assertNotIn("conversation", minimized)
+        self.assertNotIn("previous_response_id", minimized)
+        self.assertNotIn("prompt_cache_key", minimized)
+        self.assertNotIn("user", minimized)
+        self.assertNotIn("instructions", minimized)
+        self.assertNotIn("service_tier", minimized)
+        self.assertNotIn("include", minimized)
 
 
 if __name__ == "__main__":
