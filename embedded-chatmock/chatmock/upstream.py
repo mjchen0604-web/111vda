@@ -222,6 +222,10 @@ def _flatten_response_history_items(input_items: Any, *, has_previous_response_i
     return _sanitize_orphan_function_call_outputs(flattened)
 
 
+def prepare_upstream_input_items(input_items: Any, *, has_previous_response_id: bool) -> Any:
+    return _flatten_response_history_items(input_items, has_previous_response_id=has_previous_response_id)
+
+
 def _minimize_responses_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return payload

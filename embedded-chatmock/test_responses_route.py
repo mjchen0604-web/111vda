@@ -243,6 +243,96 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(captured["reasoning_param"], {"effort": "xhigh", "summary": "auto"})
         self.assertNotIn("max_output_tokens", captured["extra_payload"])
 
+    def test_v1_responses_cleans_cherry_style_history_before_upstream(self):
+        captured = {}
+
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            captured["model"] = model
+            captured["input_items"] = input_items
+            captured["extra_payload"] = dict(extra_payload or {})
+            captured["service_tier"] = kwargs.get("service_tier")
+            return (
+                DummyUpstream(
+                    {
+                        "id": "resp_cherry",
+                        "object": "response",
+                        "created_at": 123,
+                        "status": "completed",
+                        "model": model,
+                        "output": [],
+                        "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                    }
+                ),
+                None,
+            )
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4-fast-xhigh",
+                    "stream": False,
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "今日国际形势如何"}],
+                        },
+                        {
+                            "type": "reasoning",
+                            "id": "rs_123",
+                            "encrypted_content": None,
+                            "summary": [],
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "call_123",
+                            "name": "builtin_web_search",
+                            "arguments": "{\"q\":\"news\"}",
+                            "id": "fc_123",
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_123",
+                            "output": [
+                                {"type": "input_text", "text": "search result"},
+                            ],
+                        },
+                    ],
+                    "temperature": "[undefined]",
+                    "top_p": "[undefined]",
+                    "conversation": "[undefined]",
+                    "previous_response_id": "[undefined]",
+                    "prompt_cache_key": "[undefined]",
+                    "service_tier": "[undefined]",
+                    "instructions": "[undefined]",
+                    "store": False,
+                    "include": ["reasoning.encrypted_content"],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "builtin_web_search",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                    "tool_choice": "auto",
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(captured["model"], "gpt-5.4")
+        self.assertEqual(captured["service_tier"], "priority")
+        self.assertEqual(len(captured["input_items"]), 2)
+        self.assertEqual(captured["input_items"][0]["role"], "user")
+        self.assertEqual(captured["input_items"][1]["type"], "message")
+        self.assertIn("[tool_result:call_123]", captured["input_items"][1]["content"][0]["text"])
+        self.assertNotIn("previous_response_id", captured["extra_payload"])
+        self.assertNotIn("conversation", captured["extra_payload"])
+        self.assertNotIn("prompt_cache_key", captured["extra_payload"])
+
     def test_v1_responses_compact_returns_local_summary(self):
         resp = self.client.post(
             "/v1/responses/compact",

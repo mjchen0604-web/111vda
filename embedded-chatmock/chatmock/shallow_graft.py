@@ -9,8 +9,10 @@ def shallow_graft_mode_enabled() -> bool:
 
 def explicit_previous_response_id(payload: Dict[str, Any]) -> str | None:
     value = payload.get("previous_response_id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized and normalized.lower() not in ("undefined", "[undefined]"):
+            return normalized
     return None
 
 

@@ -31,7 +31,7 @@ from .upstream_errors import (
     normalized_error_payload,
     should_retry_next_candidate,
 )
-from .upstream import normalize_model_name, start_upstream_request
+from .upstream import normalize_model_name, prepare_upstream_input_items, start_upstream_request
 from .thread_sessions import resolve_thread_session_state
 from .usage_passthrough import (
     extract_responses_usage_from_event,
@@ -328,9 +328,14 @@ def _normalize_responses_input(payload: Dict[str, Any]) -> tuple[List[Dict[str, 
         if not isinstance(item, dict):
             return None, f"input[{idx}] must be an object"
         item_copy = dict(item)
+        item_copy.pop("id", None)
         if item_copy.get("type") == "function_call" and isinstance(item_copy.get("name"), str):
             item_copy["name"] = sanitize_reserved_tool_name(item_copy.get("name"))
         normalized.append(item_copy)
+    normalized = prepare_upstream_input_items(
+        normalized,
+        has_previous_response_id=bool(payload.get("previous_response_id") and str(payload.get("previous_response_id")).strip().lower() not in ("", "undefined", "[undefined]")),
+    )
     return normalized, None
 
 
@@ -392,8 +397,14 @@ def _build_responses_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     extra: Dict[str, Any] = {}
     for key in passthrough_keys:
-        if key in payload and payload.get(key) is not None:
-            extra[key] = payload.get(key)
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip().lower() in ("", "undefined", "[undefined]"):
+            continue
+        extra[key] = value
     return extra
 
 
