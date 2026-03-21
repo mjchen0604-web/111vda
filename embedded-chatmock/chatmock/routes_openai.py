@@ -64,6 +64,35 @@ def _log_json(prefix: str, payload: Any) -> None:
             pass
 
 
+def _log_invalid_request_diagnostic(
+    label: str,
+    *,
+    payload: Dict[str, Any] | None,
+    error_info: Dict[str, Any] | None,
+) -> None:
+    info = error_info if isinstance(error_info, dict) else {}
+    if normalized_error_payload(info).get("type") != "invalid_request_error":
+        return
+    snapshot = payload if isinstance(payload, dict) else {}
+    compact = {
+        "model": snapshot.get("model"),
+        "prompt_mode": snapshot.get("prompt_mode"),
+        "service_tier": snapshot.get("service_tier"),
+        "fast_mode": snapshot.get("fast_mode"),
+        "responses_tool_choice": snapshot.get("responses_tool_choice"),
+        "tool_choice": snapshot.get("tool_choice"),
+        "has_previous_response_id": bool(snapshot.get("previous_response_id")),
+        "has_prompt_cache_key": bool(snapshot.get("prompt_cache_key")),
+        "input_count": len(snapshot.get("input") or []) if isinstance(snapshot.get("input"), list) else None,
+        "messages_count": len(snapshot.get("messages") or []) if isinstance(snapshot.get("messages"), list) else None,
+        "raw_status": info.get("raw_status"),
+        "raw_code": info.get("raw_code"),
+        "raw_message": info.get("raw_message"),
+        "raw_body": info.get("raw_body"),
+    }
+    _log_json(label, compact)
+
+
 def _wrap_stream_logging(label: str, iterator, enabled: bool):
     if not enabled:
         return iterator
@@ -933,12 +962,25 @@ def responses() -> Response:
         extra_payload=extra_payload,
     )
     if error_resp is not None:
+        try:
+            _log_invalid_request_diagnostic(
+                "INVALID REQUEST /v1/responses request_start",
+                payload=payload,
+                error_info=error_info_from_flask_response("chatcore", "request_start", error_resp),
+            )
+        except Exception:
+            pass
         return error_resp
 
     record_rate_limits_from_response(upstream)
     created = int(time.time())
     if upstream.status_code >= 400:
         error_info = error_info_from_http_response(getattr(upstream, "chatmock_source", "upstream"), "http", upstream)
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/responses upstream_http",
+            payload=payload,
+            error_info=error_info,
+        )
         return build_openai_error_response(error_info)
 
     if stream_req:
@@ -1243,6 +1285,11 @@ def chat_completions() -> Response:
                 is_stream=is_stream,
                 extra={"error_info": error_info},
             )
+            _log_invalid_request_diagnostic(
+                "INVALID REQUEST /v1/chat/completions request_start",
+                payload=payload,
+                error_info=error_info,
+            )
             return build_openai_error_response(error_info)
 
         record_rate_limits_from_response(upstream)
@@ -1293,6 +1340,11 @@ def chat_completions() -> Response:
                 upstream=upstream,
                 extra={"error_info": error_info},
             )
+            _log_invalid_request_diagnostic(
+                "INVALID REQUEST /v1/chat/completions upstream_http",
+                payload=payload,
+                error_info=error_info,
+            )
             return build_openai_error_response(error_info)
         if not is_stream:
             nonstream_result = _consume_chat_completion_nonstream(
@@ -1319,6 +1371,11 @@ def chat_completions() -> Response:
                     is_stream=is_stream,
                     upstream=upstream,
                     extra={"error_info": error_info},
+                )
+                _log_invalid_request_diagnostic(
+                    "INVALID REQUEST /v1/chat/completions nonstream",
+                    payload=payload,
+                    error_info=error_info if isinstance(error_info, dict) else None,
                 )
                 return build_openai_error_response(error_info or build_error_info(
                     source="chatcore",
@@ -1671,6 +1728,11 @@ def completions() -> Response:
                 upstream=upstream,
                 extra={"error_info": error_info},
             )
+            _log_invalid_request_diagnostic(
+                "INVALID REQUEST /v1/completions upstream_http",
+                payload=payload,
+                error_info=error_info,
+            )
             return build_openai_error_response(error_info)
         if not stream_req:
             nonstream_result = _consume_text_completion_nonstream(
@@ -1696,6 +1758,11 @@ def completions() -> Response:
                     is_stream=stream_req,
                     upstream=upstream,
                     extra={"error_info": error_info},
+                )
+                _log_invalid_request_diagnostic(
+                    "INVALID REQUEST /v1/completions nonstream",
+                    payload=payload,
+                    error_info=error_info if isinstance(error_info, dict) else None,
                 )
                 return build_openai_error_response(error_info or build_error_info(
                     source="chatcore",

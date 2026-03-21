@@ -23,6 +23,7 @@ from .upstream_errors import (
     error_info_from_event_response,
     error_info_from_flask_response,
     error_info_from_http_response,
+    normalized_error_payload,
     should_retry_next_candidate,
 )
 from .upstream import normalize_model_name, start_upstream_request
@@ -48,6 +49,33 @@ def _log_json(prefix: str, payload: Any) -> None:
             print(f"{prefix}\n{payload}")
         except Exception:
             pass
+
+
+def _log_invalid_request_diagnostic(
+    label: str,
+    *,
+    payload: Dict[str, Any] | None,
+    error_info: Dict[str, Any] | None,
+) -> None:
+    info = error_info if isinstance(error_info, dict) else {}
+    error_type = normalized_error_payload(info).get("type")
+    if error_type != "invalid_request_error":
+        return
+    snapshot = payload if isinstance(payload, dict) else {}
+    compact = {
+        "model": snapshot.get("model"),
+        "prompt_mode": snapshot.get("prompt_mode"),
+        "service_tier": snapshot.get("service_tier"),
+        "tool_choice": snapshot.get("tool_choice"),
+        "has_previous_response_id": bool(snapshot.get("previous_response_id")),
+        "messages_count": len(snapshot.get("messages") or []) if isinstance(snapshot.get("messages"), list) else None,
+        "tools_count": len(snapshot.get("tools") or []) if isinstance(snapshot.get("tools"), list) else None,
+        "raw_status": info.get("raw_status"),
+        "raw_code": info.get("raw_code"),
+        "raw_message": info.get("raw_message"),
+        "raw_body": info.get("raw_body"),
+    }
+    _log_json(label, compact)
 
 
 def _instructions_for_model(model: str) -> str:
@@ -875,6 +903,11 @@ def messages() -> Response:
             last_error_info = error_info
             if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
                 continue
+            _log_invalid_request_diagnostic(
+                "INVALID REQUEST /v1/messages request_start",
+                payload=payload,
+                error_info=error_info,
+            )
             return build_anthropic_error_response(error_info)
 
         record_rate_limits_from_response(upstream)
@@ -887,6 +920,11 @@ def messages() -> Response:
             last_error_info = error_info
             if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
                 continue
+            _log_invalid_request_diagnostic(
+                "INVALID REQUEST /v1/messages upstream_http",
+                payload=payload,
+                error_info=error_info,
+            )
             return build_anthropic_error_response(error_info)
         break
 
@@ -992,6 +1030,11 @@ def messages() -> Response:
             )
 
     if not result.get("ok"):
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/messages nonstream",
+            payload=payload,
+            error_info=result.get("error_info") if isinstance(result, dict) else None,
+        )
         return build_anthropic_error_response(result.get("error_info"))
 
     message_obj = result.get("message_obj") or {}
