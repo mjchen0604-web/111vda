@@ -83,6 +83,27 @@ class DummyFailedUpstream:
         return None
 
 
+class DummyHTTPInvalidRequestUpstream:
+    status_code = 400
+    reason = "Bad Request"
+    chatmock_source = "chatgpt-backend"
+
+    def __init__(self):
+        body = {
+            "error": {
+                "message": "Invalid request",
+                "type": "invalid_request_error",
+                "param": "",
+                "code": None,
+            }
+        }
+        self.content = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        self.text = self.content.decode("utf-8")
+
+    def close(self):
+        return None
+
+
 class CompatSessionRouteTests(unittest.TestCase):
     def setUp(self):
         clear_thread_session("sess-chat")
@@ -304,6 +325,122 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_missing")
         self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
         self.assertNotIn("event: error", body)
+
+    def test_responses_nonstream_retries_without_previous_response_id_on_generic_invalid_request(self):
+        calls = []
+
+        def stub(model, input_items, **kwargs):
+            calls.append({"input_items": input_items, "extra_payload": dict(kwargs.get("extra_payload") or {})})
+            if len(calls) == 1:
+                return DummyHTTPInvalidRequestUpstream(), None
+            return DummyUpstream("resp_responses_retry"), None
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "previous_response_id": "resp_invalid",
+                    "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_invalid")
+        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
+
+    def test_anthropic_nonstream_retries_without_previous_response_id_on_generic_invalid_request(self):
+        calls = []
+
+        def stub(model, input_items, **kwargs):
+            calls.append({"input_items": input_items, "extra_payload": dict(kwargs.get("extra_payload") or {})})
+            if len(calls) == 1:
+                return DummyHTTPInvalidRequestUpstream(), None
+            return DummyUpstream("resp_messages_retry"), None
+
+        original = routes_anthropic.start_upstream_request
+        routes_anthropic.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/messages",
+                json={
+                    "model": "claude-3-5-sonnet",
+                    "stream": False,
+                    "previous_response_id": "resp_invalid",
+                    "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                },
+            )
+        finally:
+            routes_anthropic.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_invalid")
+        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
+
+    def test_chat_completions_nonstream_retries_without_previous_response_id_on_generic_invalid_request(self):
+        calls = []
+
+        def stub(model, input_items, **kwargs):
+            calls.append({"input_items": input_items, "extra_payload": dict(kwargs.get("extra_payload") or {})})
+            if len(calls) == 1:
+                return DummyHTTPInvalidRequestUpstream(), None
+            return DummyUpstream("resp_chat_retry"), None
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "previous_response_id": "resp_invalid",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_invalid")
+        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
+
+    def test_ollama_nonstream_retries_without_previous_response_id_on_generic_invalid_request(self):
+        calls = []
+
+        def stub(model, input_items, **kwargs):
+            calls.append({"input_items": input_items, "extra_payload": dict(kwargs.get("extra_payload") or {})})
+            if len(calls) == 1:
+                return DummyHTTPInvalidRequestUpstream(), None
+            return DummyUpstream("resp_ollama_retry"), None
+
+        original = routes_ollama.start_upstream_request
+        routes_ollama.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/api/chat",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "previous_response_id": "resp_invalid",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+            )
+        finally:
+            routes_ollama.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_invalid")
+        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
 
     def test_ollama_stream_retries_without_previous_response_id(self):
         calls = []

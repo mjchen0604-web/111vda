@@ -10,7 +10,7 @@ from .config import BASE_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS
 from .context_compaction import maybe_compact_input_items
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .limits import record_rate_limits_from_response
-from .responses_session import is_previous_response_not_found, resolve_turn_state, save_response_session
+from .responses_session import resolve_turn_state, save_response_session, should_retry_without_previous_response
 from .reasoning import (
     allowed_efforts_for_model,
     build_reasoning_param,
@@ -607,7 +607,7 @@ def _anthropic_stream(upstream, model_out: str, verbose: bool, *, on_completed=N
                     evt.get("response"),
                 )
                 if not has_visible_output and (
-                    should_retry_next_candidate(error_info) or is_previous_response_not_found(error_info)
+                    should_retry_next_candidate(error_info) or should_retry_without_previous_response(error_info)
                 ):
                     raise RetryableStreamError(error_info)
                 payload = build_anthropic_error_response(error_info).get_json()
@@ -918,6 +918,33 @@ def messages() -> Response:
                 pass
             error_info = error_info_from_http_response(getattr(upstream, "chatmock_source", "upstream"), "http", upstream)
             last_error_info = error_info
+            if effective_previous_response_id and should_retry_without_previous_response(error_info):
+                retry_extra_payload = dict(extra_payload)
+                retry_extra_payload.pop("previous_response_id", None)
+                retry_upstream, retry_error = start_upstream_request(
+                    model,
+                    full_input_items,
+                    instructions=instructions,
+                    tools=tools_responses,
+                    tool_choice=tool_choice,
+                    parallel_tool_calls=parallel_tool_calls,
+                    reasoning_param=reasoning_param,
+                    service_tier=service_tier,
+                    thread_session=thread_session,
+                    extra_payload=retry_extra_payload,
+                )
+                if retry_error is None and retry_upstream is not None and retry_upstream.status_code < 400:
+                    upstream = retry_upstream
+                    break
+                if retry_error is not None:
+                    error_info = error_info_from_flask_response("chatcore", "request_start", retry_error)
+                elif retry_upstream is not None:
+                    error_info = error_info_from_http_response(
+                        getattr(retry_upstream, "chatmock_source", "upstream"),
+                        "http",
+                        retry_upstream,
+                    )
+                last_error_info = error_info
             if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
                 continue
             _log_invalid_request_diagnostic(
@@ -962,7 +989,7 @@ def messages() -> Response:
                     if (
                         effective_previous_response_id
                         and not recovered_previous_response
-                        and is_previous_response_not_found(exc.error_info)
+                        and should_retry_without_previous_response(exc.error_info)
                     ):
                         retry_extra_payload = dict(extra_payload)
                         retry_extra_payload.pop("previous_response_id", None)
@@ -1006,7 +1033,7 @@ def messages() -> Response:
         model_out=model_out,
         service_tier=service_tier,
     )
-    if not result.get("ok") and effective_previous_response_id and is_previous_response_not_found(result.get("error_info")):
+    if not result.get("ok") and effective_previous_response_id and should_retry_without_previous_response(result.get("error_info")):
         retry_extra_payload = dict(extra_payload)
         retry_extra_payload.pop("previous_response_id", None)
         retry_upstream, retry_error = start_upstream_request(

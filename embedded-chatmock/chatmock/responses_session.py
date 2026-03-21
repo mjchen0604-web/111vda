@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from .shallow_graft import explicit_previous_response_id, shallow_graft_mode_enabled
 from .thread_sessions import save_thread_session
+from .upstream_errors import normalized_error_payload
 
 
 def is_previous_response_not_found(error_info: Dict[str, Any] | None) -> bool:
@@ -12,6 +13,28 @@ def is_previous_response_not_found(error_info: Dict[str, Any] | None) -> bool:
     raw_code = str(error_info.get("raw_code") or "").strip().lower()
     raw_message = str(error_info.get("raw_message") or "").strip().lower()
     return raw_code == "previous_response_not_found" or "previous_response_not_found" in raw_message
+
+
+def should_retry_without_previous_response(error_info: Dict[str, Any] | None) -> bool:
+    if is_previous_response_not_found(error_info):
+        return True
+    if not isinstance(error_info, dict):
+        return False
+    raw_status = error_info.get("raw_status")
+    if not isinstance(raw_status, int) or raw_status != 400:
+        return False
+    normalized = normalized_error_payload(error_info)
+    if str(normalized.get("type") or "").strip().lower() != "invalid_request_error":
+        return False
+    raw_code = str(error_info.get("raw_code") or "").strip().lower()
+    if raw_code not in ("", "invalid_request", "invalid_request_error", "bad_request"):
+        return False
+    source = str(error_info.get("source") or "").strip().lower()
+    if source not in ("", "chatgpt-backend", "upstream", "chatcore"):
+        return False
+    raw_message = str(error_info.get("raw_message") or "").strip().lower()
+    normalized_message = str(normalized.get("message") or "").strip().lower()
+    return "invalid request" in raw_message or normalized_message == "invalid request"
 
 
 def resolve_turn_state(
