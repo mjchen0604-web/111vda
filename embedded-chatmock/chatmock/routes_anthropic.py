@@ -79,6 +79,16 @@ def _log_invalid_request_diagnostic(
     _log_json(label, compact)
 
 
+def _local_invalid_request_info(message: str, *, raw_body: Any = None) -> Dict[str, Any]:
+    return build_error_info(
+        source="chatcore",
+        phase="local_validation",
+        raw_status=400,
+        raw_message=message,
+        raw_body=raw_body if raw_body is not None else {"message": message},
+    )
+
+
 def _instructions_for_model(model: str) -> str:
     base = current_app.config.get("BASE_INSTRUCTIONS", BASE_INSTRUCTIONS)
     if "codex" in (model or "").lower():
@@ -828,6 +838,11 @@ def messages() -> Response:
 
     payload = _decode_json_body(raw)
     if payload is None:
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/messages local_validation",
+            payload=None,
+            error_info=_local_invalid_request_info("invalid JSON body", raw_body={"raw": raw[:1000]}),
+        )
         return _error_response("invalid JSON body", 400, "invalid_request_error")
 
     requested_model = payload.get("model")
@@ -835,9 +850,19 @@ def messages() -> Response:
 
     input_items, msg_err = _convert_anthropic_messages_to_input(payload.get("messages"))
     if msg_err:
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/messages local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info(msg_err),
+        )
         return _error_response(msg_err, 400, "invalid_request_error")
     assert isinstance(input_items, list)
     if not input_items:
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/messages local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info("messages must include at least one content block"),
+        )
         return _error_response("messages must include at least one content block", 400, "invalid_request_error")
 
     system_text = _system_to_text(payload.get("system")).strip()
@@ -847,11 +872,21 @@ def messages() -> Response:
 
     tools_responses, tools_err = _convert_anthropic_tools(payload.get("tools"))
     if tools_err:
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/messages local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info(tools_err),
+        )
         return _error_response(tools_err, 400, "invalid_request_error")
     assert isinstance(tools_responses, list)
 
     tool_choice, parallel_tool_calls, tool_choice_err = _convert_anthropic_tool_choice(payload.get("tool_choice"))
     if tool_choice_err:
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/messages local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info(tool_choice_err),
+        )
         return _error_response(tool_choice_err, 400, "invalid_request_error")
     if isinstance(payload.get("parallel_tool_calls"), bool):
         parallel_tool_calls = bool(payload.get("parallel_tool_calls"))

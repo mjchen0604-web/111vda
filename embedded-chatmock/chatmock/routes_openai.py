@@ -94,6 +94,16 @@ def _log_invalid_request_diagnostic(
     _log_json(label, compact)
 
 
+def _local_invalid_request_info(message: str, *, raw_body: Any = None) -> Dict[str, Any]:
+    return build_error_info(
+        source="chatcore",
+        phase="local_validation",
+        raw_status=400,
+        raw_message=message,
+        raw_body=raw_body if raw_body is not None else {"message": message},
+    )
+
+
 def _wrap_stream_logging(label: str, iterator, enabled: bool):
     if not enabled:
         return iterator
@@ -896,6 +906,11 @@ def responses() -> Response:
         payload = json.loads(raw) if raw else {}
     except Exception:
         err = {"error": {"message": "Invalid JSON body"}}
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/responses local_validation",
+            payload=None,
+            error_info=_local_invalid_request_info("Invalid JSON body", raw_body={"raw": raw[:1000]}),
+        )
         if verbose:
             _log_json("OUT POST /v1/responses", err)
         return jsonify(err), 400
@@ -905,6 +920,11 @@ def responses() -> Response:
     input_items, input_err = _normalize_responses_input(payload)
     if input_err:
         err = {"error": {"message": input_err}}
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/responses local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info(input_err),
+        )
         if verbose:
             _log_json("OUT POST /v1/responses", err)
         return jsonify(err), 400
@@ -913,6 +933,11 @@ def responses() -> Response:
     tools_payload, tools_err = _normalize_responses_tools(payload.get("tools"))
     if tools_err:
         err = {"error": {"message": tools_err}}
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/responses local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info(tools_err),
+        )
         if verbose:
             _log_json("OUT POST /v1/responses", err)
         return jsonify(err), 400
@@ -1189,6 +1214,11 @@ def chat_completions() -> Response:
             payload = json.loads(raw.replace("\r", "").replace("\n", ""))
         except Exception:
             err = {"error": {"message": "Invalid JSON body"}}
+            _log_invalid_request_diagnostic(
+                "INVALID REQUEST /v1/chat/completions local_validation",
+                payload=None,
+                error_info=_local_invalid_request_info("Invalid JSON body", raw_body={"raw": raw[:1000]}),
+            )
             if verbose:
                 _log_json("OUT POST /v1/chat/completions", err)
             return jsonify(err), 400
@@ -1204,6 +1234,11 @@ def chat_completions() -> Response:
         messages = []
     if not isinstance(messages, list):
         err = {"error": {"message": "Request must include messages: []"}}
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/chat/completions local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info("Request must include messages: []"),
+        )
         if verbose:
             _log_json("OUT POST /v1/chat/completions", err)
         return jsonify(err), 400
