@@ -15,6 +15,7 @@ from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
     _is_generic_invalid_request,
     _minimize_responses_payload,
+    _sanitize_orphan_function_call_outputs,
     normalize_model_name,
     resolve_upstream_mode,
 )
@@ -149,6 +150,23 @@ class UpstreamRoutingTests(unittest.TestCase):
         self.assertNotIn("store", extra)
         self.assertEqual(extra["prompt_cache_key"], "sess_123")
         self.assertEqual(extra["temperature"], 0.2)
+
+    def test_orphan_function_call_output_falls_back_to_user_text(self):
+        items = [
+            {"type": "function_call_output", "call_id": "call_missing", "output": "tool output"},
+        ]
+        sanitized = _sanitize_orphan_function_call_outputs(items)
+        self.assertEqual(sanitized[0]["type"], "message")
+        self.assertEqual(sanitized[0]["role"], "user")
+        self.assertIn("[tool_result:call_missing]", sanitized[0]["content"][0]["text"])
+
+    def test_function_call_output_kept_when_call_id_was_seen(self):
+        items = [
+            {"type": "function_call", "call_id": "call_ok", "name": "tool", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_ok", "output": "tool output"},
+        ]
+        sanitized = _sanitize_orphan_function_call_outputs(items)
+        self.assertEqual(sanitized[1]["type"], "function_call_output")
 
 
 if __name__ == "__main__":

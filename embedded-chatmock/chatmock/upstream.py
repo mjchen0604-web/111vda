@@ -137,10 +137,57 @@ def _build_invalid_request_retry_payloads(payload: Dict[str, Any]) -> List[Dict[
     return variants
 
 
+def _stringify_function_output(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+def _sanitize_orphan_function_call_outputs(input_items: Any) -> Any:
+    if not isinstance(input_items, list):
+        return input_items
+    sanitized: List[Dict[str, Any]] = []
+    seen_call_ids: set[str] = set()
+    for item in input_items:
+        if not isinstance(item, dict):
+            sanitized.append(item)
+            continue
+        item_type = str(item.get("type") or "").strip()
+        if item_type == "function_call":
+            call_id = str(item.get("call_id") or item.get("id") or "").strip()
+            if call_id:
+                seen_call_ids.add(call_id)
+            sanitized.append(item)
+            continue
+        if item_type == "function_call_output":
+            call_id = str(item.get("call_id") or "").strip()
+            if call_id and call_id in seen_call_ids:
+                sanitized.append(item)
+                continue
+            output_text = _stringify_function_output(item.get("output"))
+            fallback_text = f"[tool_result:{call_id or 'unknown'}]\n{output_text}" if output_text else f"[tool_result:{call_id or 'unknown'}]"
+            sanitized.append(
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": fallback_text}],
+                }
+            )
+            continue
+        sanitized.append(item)
+    return sanitized
+
+
 def _minimize_responses_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return payload
     minimized = json.loads(json.dumps(payload, ensure_ascii=False))
+    minimized["input"] = _sanitize_orphan_function_call_outputs(minimized.get("input"))
+    if minimized.get("input") is None:
+        minimized.pop("input", None)
 
     instructions = minimized.get("instructions")
     if not isinstance(instructions, str) or not instructions.strip():
