@@ -134,7 +134,7 @@ class UpstreamRoutingTests(unittest.TestCase):
             "prompt_cache_key": "sess_123",
         }
         minimized = _minimize_responses_payload(payload)
-        self.assertEqual(minimized, {"model": "gpt-5.4", "prompt_cache_key": "sess_123"})
+        self.assertEqual(minimized, {"model": "gpt-5.4", "store": False, "prompt_cache_key": "sess_123"})
 
     def test_responses_extra_payload_does_not_passthrough_store(self):
         from chatmock.routes_openai import _build_responses_extra_payload

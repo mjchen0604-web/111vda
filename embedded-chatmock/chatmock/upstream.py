@@ -164,9 +164,6 @@ def _minimize_responses_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if minimized.get("parallel_tool_calls") is False:
         minimized.pop("parallel_tool_calls", None)
 
-    if minimized.get("store") is False:
-        minimized.pop("store", None)
-
     return minimized
 
 
