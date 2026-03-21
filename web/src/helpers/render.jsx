@@ -1464,6 +1464,7 @@ export function renderModelPrice(
   completionRatio,
   groupRatio,
   user_group_ratio,
+  consumeRatio = 1.0,
   cacheTokens = 0,
   cacheRatio = 1.0,
   image = false,
@@ -1490,6 +1491,10 @@ export function renderModelPrice(
   groupRatio = effectiveGroupRatio;
 
   const { symbol, rate } = getCurrencyConfig();
+  const effectiveConsumeRatio =
+    Number.isFinite(Number(consumeRatio)) && Number(consumeRatio) > 0
+      ? Number(consumeRatio)
+      : 1;
 
   if (!shouldUseRatioBillingProcess(modelPrice)) {
     if (modelPrice !== -1) {
@@ -1524,10 +1529,12 @@ export function renderModelPrice(
       completionRatio = 0;
     }
     const inputBaseMultiplier = getOpenAIInputBaseMultiplier(modelName, 1);
-    const inputRatioPrice = modelRatio * inputBaseMultiplier;
-    const completionRatioPrice = modelRatio * inputBaseMultiplier * completionRatio;
-    const cacheRatioPrice = modelRatio * inputBaseMultiplier * cacheRatio;
-    const imageRatioPrice = modelRatio * inputBaseMultiplier * imageRatio;
+    const inputRatioPrice =
+      modelRatio * inputBaseMultiplier * effectiveConsumeRatio;
+    const completionRatioPrice =
+      modelRatio * inputBaseMultiplier * completionRatio * effectiveConsumeRatio;
+    const cacheRatioPrice = inputRatioPrice * cacheRatio;
+    const imageRatioPrice = inputRatioPrice * imageRatio;
     let effectiveInputTokens =
       inputTokens - cacheTokens + cacheTokens * cacheRatio;
     if (image && imageOutputTokens > 0) {
@@ -1563,11 +1570,14 @@ export function renderModelPrice(
               total: (completionRatioPrice * rate).toFixed(6),
             })}
           </p>
+          {effectiveConsumeRatio !== 1 && (
+            <p>{`实际消耗倍率 ${effectiveConsumeRatio}`}</p>
+          )}
           {cacheTokens > 0 && (
             <p>
               {i18next.t('缓存读取价格：{{symbol}}{{total}} / 1M tokens', {
                 symbol,
-                total: (inputRatioPrice * cacheRatio * rate).toFixed(6),
+                total: (cacheRatioPrice * rate).toFixed(6),
               })}
             </p>
           )}
@@ -1946,6 +1956,7 @@ export function renderLogContent(
   modelPrice = -1,
   groupRatio,
   user_group_ratio,
+  consumeRatio = 1.0,
   cacheRatio = 1.0,
   image = false,
   imageRatio = 1.0,
@@ -1961,6 +1972,10 @@ export function renderLogContent(
     label: ratioLabel,
     useUserGroupRatio: useUserGroupRatio,
   } = getEffectiveRatio(groupRatio, user_group_ratio);
+  const effectiveConsumeRatio =
+    Number.isFinite(Number(consumeRatio)) && Number(consumeRatio) > 0
+      ? Number(consumeRatio)
+      : 1;
 
   // 获取货币配置
   const { symbol, rate } = getCurrencyConfig();
@@ -1980,7 +1995,12 @@ export function renderLogContent(
     const parts = [
       i18next.t('输入价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
-        price: (modelRatio * inputBaseMultiplier * rate).toFixed(6),
+        price: (
+          modelRatio *
+          inputBaseMultiplier *
+          effectiveConsumeRatio *
+          rate
+        ).toFixed(6),
       }),
       i18next.t('补全价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
@@ -1988,17 +2008,30 @@ export function renderLogContent(
           modelRatio *
           inputBaseMultiplier *
           completionRatio *
+          effectiveConsumeRatio *
           rate
         ).toFixed(6),
       }),
     ];
     appendPricePart(parts, cacheRatio !== 1.0, '缓存读取价格 {{symbol}}{{price}} / 1M tokens', {
       symbol,
-      price: (modelRatio * inputBaseMultiplier * cacheRatio * rate).toFixed(6),
+      price: (
+        modelRatio *
+        inputBaseMultiplier *
+        cacheRatio *
+        effectiveConsumeRatio *
+        rate
+      ).toFixed(6),
     });
     appendPricePart(parts, image, '图片输入价格 {{symbol}}{{price}} / 1M tokens', {
       symbol,
-      price: (modelRatio * inputBaseMultiplier * imageRatio * rate).toFixed(6),
+      price: (
+        modelRatio *
+        inputBaseMultiplier *
+        imageRatio *
+        effectiveConsumeRatio *
+        rate
+      ).toFixed(6),
     });
     appendPricePart(parts, webSearch, 'Web 搜索调用 {{webSearchCallCount}} 次', {
       webSearchCallCount,
