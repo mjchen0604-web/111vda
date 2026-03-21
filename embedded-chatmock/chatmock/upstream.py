@@ -188,11 +188,49 @@ def _sanitize_orphan_function_call_outputs(input_items: Any) -> Any:
     return sanitized
 
 
+def _flatten_response_history_items(input_items: Any, *, has_previous_response_id: bool) -> Any:
+    if not isinstance(input_items, list):
+        return input_items
+    if has_previous_response_id:
+        return _sanitize_orphan_function_call_outputs(input_items)
+
+    flattened: List[Dict[str, Any]] = []
+    for item in input_items:
+        if not isinstance(item, dict):
+            flattened.append(item)
+            continue
+        item_type = str(item.get("type") or "").strip()
+        if item_type == "reasoning":
+            continue
+        if item_type == "function_call":
+            continue
+        if item_type == "function_call_output":
+            call_id = str(item.get("call_id") or "").strip() or "unknown"
+            output_text = _stringify_function_output(item.get("output"))
+            fallback_text = f"[tool_result:{call_id}]\n{output_text}" if output_text else f"[tool_result:{call_id}]"
+            flattened.append(
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": fallback_text}],
+                }
+            )
+            continue
+        item_copy = dict(item)
+        item_copy.pop("id", None)
+        flattened.append(item_copy)
+    return _sanitize_orphan_function_call_outputs(flattened)
+
+
 def _minimize_responses_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return payload
     minimized = json.loads(json.dumps(payload, ensure_ascii=False))
-    minimized["input"] = _sanitize_orphan_function_call_outputs(minimized.get("input"))
+    has_previous_response_id = bool(minimized.get("previous_response_id"))
+    minimized["input"] = _flatten_response_history_items(
+        minimized.get("input"),
+        has_previous_response_id=has_previous_response_id,
+    )
     if minimized.get("input") is None:
         minimized.pop("input", None)
 

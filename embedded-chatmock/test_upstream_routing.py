@@ -13,6 +13,7 @@ from chatmock.routes_openai import _instructions_for_model, _resolve_bridge_inst
 from chatmock.upstream_errors import extract_retry_after_unlock_ts
 from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
+    _flatten_response_history_items,
     _is_generic_invalid_request,
     _is_undefined_text_value,
     _minimize_responses_payload,
@@ -168,6 +169,28 @@ class UpstreamRoutingTests(unittest.TestCase):
         ]
         sanitized = _sanitize_orphan_function_call_outputs(items)
         self.assertEqual(sanitized[1]["type"], "function_call_output")
+
+    def test_flatten_response_history_items_without_previous_response_id(self):
+        items = [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]},
+            {"type": "reasoning", "id": "rs_123", "summary": []},
+            {"type": "function_call", "id": "fc_123", "call_id": "call_123", "name": "builtin_web_search", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_123", "output": [{"type": "input_text", "text": "search result"}]},
+        ]
+        flattened = _flatten_response_history_items(items, has_previous_response_id=False)
+        self.assertEqual(len(flattened), 2)
+        self.assertEqual(flattened[0]["type"], "message")
+        self.assertEqual(flattened[1]["type"], "message")
+        self.assertIn("[tool_result:call_123]", flattened[1]["content"][0]["text"])
+
+    def test_flatten_response_history_items_with_previous_response_id_keeps_tool_output(self):
+        items = [
+            {"type": "function_call", "call_id": "call_123", "name": "builtin_web_search", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_123", "output": "search result"},
+        ]
+        flattened = _flatten_response_history_items(items, has_previous_response_id=True)
+        self.assertEqual(flattened[0]["type"], "function_call")
+        self.assertEqual(flattened[1]["type"], "function_call_output")
 
     def test_undefined_text_detector_matches_cherry_sentinels(self):
         self.assertTrue(_is_undefined_text_value("[undefined]"))
