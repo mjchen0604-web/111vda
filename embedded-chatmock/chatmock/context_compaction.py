@@ -253,7 +253,8 @@ def maybe_compact_input_items(
 
     total_serialized_chars = sum(len(_safe_dump(item)) for item in input_items)
     keep_recent = min(int(settings["preserve_recent_items"]), max(1, len(input_items) - 1))
-    should_compact = len(input_items) > int(settings["max_input_items"]) or (
+    oversized_body = len(input_items) > 1 and total_serialized_chars > int(settings["max_summary_chars"]) * 2
+    should_compact = len(input_items) > int(settings["max_input_items"]) or oversized_body or (
         len(input_items) >= int(settings["min_input_items"])
         and total_serialized_chars > int(settings["max_summary_chars"]) * 2
     )

@@ -71,3 +71,30 @@ class ContextCompactionTests(unittest.TestCase):
 
         self.assertFalse(meta["applied"])
         self.assertEqual(compacted_items, input_items)
+
+    def test_large_body_compacts_even_when_item_count_is_small(self):
+        payload = {
+            "context_management": {
+                "max_input_items": 20,
+                "min_input_items": 12,
+                "preserve_recent_items": 2,
+                "max_summary_chars": 1200,
+            }
+        }
+        large_text = "A" * 4000
+        input_items = [
+            _message("user", "hello"),
+            _message("assistant", large_text),
+            _message("user", "follow-up"),
+        ]
+
+        compacted_items, compacted_instructions, meta = maybe_compact_input_items(
+            payload,
+            input_items,
+            "Base instructions",
+        )
+
+        self.assertTrue(meta["applied"])
+        self.assertEqual(len(compacted_items), 2)
+        self.assertIsInstance(compacted_instructions, str)
+        self.assertIn("[Gateway compacted conversation summary]", compacted_instructions)
