@@ -33,6 +33,7 @@ _AUTH_POOL_STATE_LOCK = threading.RLock()
 _AUTH_POOL_STATE: Dict[str, Dict[str, Any]] = {}
 _INVALID_AUTH_LOCK = threading.RLock()
 _INVALID_AUTH_LABELS: set[str] = set()
+_INVALID_AUTH_ACCOUNT_IDS: set[str] = set()
 _AUTH_INFLIGHT_LOCK = threading.RLock()
 _AUTH_INFLIGHT_COUNTS: Dict[str, int] = {}
 _AUTH_SESSION_STICKY_LOCK = threading.RLock()
@@ -850,6 +851,26 @@ def _persist_dashboard_default_auth_fields(
     return _write_json_file(path, payload)
 
 
+def _invalid_auth_account_ids(stored: Dict[str, Any] | None = None) -> List[str]:
+    stored = stored if isinstance(stored, dict) else (_load_dashboard_settings() or {})
+    raw = stored.get("invalidAuthAccountIds")
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return []
+
+
+def _persist_dashboard_invalid_auth_account_ids(account_ids: List[str]) -> bool:
+    path = _dashboard_settings_path()
+    if not path:
+        return False
+    payload = _load_dashboard_settings() or {}
+    payload["invalidAuthAccountIds"] = list(dict.fromkeys([str(item).strip() for item in account_ids if str(item).strip()]))
+    payload["updatedAt"] = _now_iso8601()
+    return _write_json_file(path, payload)
+
+
 def _canonical_auth_path(path: str) -> str:
     expanded = os.path.expanduser(str(path or "").strip())
     return os.path.normcase(os.path.normpath(expanded)) if expanded else ""
@@ -913,18 +934,34 @@ def _mark_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> No
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip():
             _INVALID_AUTH_LABELS.add(label.strip())
+        if isinstance(account_id, str) and account_id.strip():
+            _INVALID_AUTH_ACCOUNT_IDS.add(account_id.strip())
+        persisted = set(_invalid_auth_account_ids())
+        if isinstance(account_id, str) and account_id.strip():
+            persisted.add(account_id.strip())
+        if persisted:
+            _persist_dashboard_invalid_auth_account_ids(sorted(persisted))
 
 
 def _clear_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> None:
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip():
             _INVALID_AUTH_LABELS.discard(label.strip())
+        persisted = set(_invalid_auth_account_ids())
+        if isinstance(account_id, str) and account_id.strip():
+            _INVALID_AUTH_ACCOUNT_IDS.discard(account_id.strip())
+            persisted.discard(account_id.strip())
+        _persist_dashboard_invalid_auth_account_ids(sorted(persisted))
 
 
 def _is_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> bool:
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip() and label.strip() in _INVALID_AUTH_LABELS:
             return True
+        if isinstance(account_id, str) and account_id.strip() and account_id.strip() in _INVALID_AUTH_ACCOUNT_IDS:
+            return True
+    if isinstance(account_id, str) and account_id.strip():
+        return account_id.strip() in set(_invalid_auth_account_ids())
     return False
 
 
@@ -1615,7 +1652,7 @@ def mark_chatgpt_auth_result(
         state = dict(_AUTH_POOL_STATE.get(label) or {})
         if success:
             effective_success_status = status_code if isinstance(status_code, int) and 200 <= status_code < 400 else 200
-            _clear_invalid_auth_candidate(label=label)
+            _clear_invalid_auth_candidate(label=label, account_id=str(account_id or "").strip())
             if account_id:
                 _set_account_cooldown(account_id=account_id, until_ts=0.0)
             _set_auth_pool_state(

@@ -12,6 +12,8 @@ from flask import Blueprint, current_app, jsonify, make_response, request, send_
 
 from .reasoning import normalize_reasoning_compat
 from .utils import (
+    _invalid_auth_account_ids,
+    _known_auth_file_paths,
     get_chatgpt_auth_records,
     get_chatgpt_runtime_candidate_records,
     get_max_retry_interval_seconds,
@@ -700,8 +702,11 @@ def dashboard_action_upload_auths():
     existing_files = [] if replace else _configured_auth_files(_read_settings_file())
     used_labels: set[str] = set()
     fingerprint_to_path: Dict[str, str] = {}
+    account_id_to_path: Dict[str, str] = {}
+    invalid_account_ids = set(_invalid_auth_account_ids())
 
-    for existing in existing_files:
+    known_files = [] if replace else _known_auth_file_paths(include_quarantined=True)
+    for existing in known_files:
         existing_path = Path(existing)
         parent_label = existing_path.parent.name.strip().lower()
         if parent_label:
@@ -709,6 +714,9 @@ def dashboard_action_upload_auths():
         payload = _read_auth_payload(existing_path)
         if isinstance(payload, dict):
             fingerprint_to_path[_auth_payload_fingerprint(payload)] = str(existing_path)
+            existing_account_id = _extract_account_id(payload)
+            if existing_account_id and existing_account_id not in account_id_to_path:
+                account_id_to_path[existing_account_id] = str(existing_path)
 
     for storage in incoming:
         try:
@@ -723,8 +731,15 @@ def dashboard_action_upload_auths():
             action = "created"
             previous_path = ""
 
+            if account_id and account_id in invalid_account_ids:
+                raise ValueError(f"account_id {account_id} is marked invalid and cannot be re-uploaded")
+
             if not replace and fingerprint in fingerprint_to_path:
                 target = Path(fingerprint_to_path[fingerprint])
+                action = "updated"
+                previous_path = str(target)
+            elif not replace and account_id and account_id in account_id_to_path:
+                target = Path(account_id_to_path[account_id])
                 action = "updated"
                 previous_path = str(target)
             else:
@@ -732,6 +747,8 @@ def dashboard_action_upload_auths():
                 used_labels.add(label)
                 target = auth_root / label / "auth.json"
                 fingerprint_to_path[fingerprint] = str(target)
+                if account_id:
+                    account_id_to_path[account_id] = str(target)
 
             _write_auth_payload(target, payload)
             written.append(str(target))
