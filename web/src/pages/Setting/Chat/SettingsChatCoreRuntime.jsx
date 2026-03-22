@@ -405,7 +405,11 @@ export default function SettingsChatCoreRuntime() {
               )}
             </Col>
             <Col xs={24} sm={12} md={6}>
-              {metric('账号数量', health?.accounts?.count || 0, '当前 auth 账号池')}
+              {metric(
+                '账号数量',
+                runtimeCandidates.count || 0,
+                `当前有效账号池 / 原始 ${runtimeCandidates.rawCount || 0}`,
+              )}
             </Col>
             <Col xs={24} sm={12} md={6}>
               {metric('模型数量', health?.models?.count || 0, '完整 chat 暴露模型')}
