@@ -68,6 +68,7 @@ class AuthPoolBehaviorTests(unittest.TestCase):
     def test_parse_auth_files_env_discovers_new_auth_files_under_same_root(self):
         original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
         original_data_dir = os.environ.get("CHATMOCK_DATA_DIR")
+        original_configured = os.environ.get("CHATGPT_LOCAL_AUTH_FILES_CONFIGURED")
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 accounts_root = Path(temp_dir) / "accounts"
@@ -91,6 +92,42 @@ class AuthPoolBehaviorTests(unittest.TestCase):
                 os.environ.pop("CHATMOCK_DATA_DIR", None)
             else:
                 os.environ["CHATMOCK_DATA_DIR"] = original_data_dir
+            if original_configured is None:
+                os.environ.pop("CHATGPT_LOCAL_AUTH_FILES_CONFIGURED", None)
+            else:
+                os.environ["CHATGPT_LOCAL_AUTH_FILES_CONFIGURED"] = original_configured
+
+    def test_parse_auth_files_env_respects_explicit_config_without_rediscovery(self):
+        original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
+        original_data_dir = os.environ.get("CHATMOCK_DATA_DIR")
+        original_configured = os.environ.get("CHATGPT_LOCAL_AUTH_FILES_CONFIGURED")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                accounts_root = Path(temp_dir) / "accounts"
+                for label in ("acc01", "acc02"):
+                    auth_dir = accounts_root / label
+                    auth_dir.mkdir(parents=True, exist_ok=True)
+                    (auth_dir / "auth.json").write_text(json.dumps({"tokens": {"account_id": label}}), encoding="utf-8")
+
+                os.environ["CHATMOCK_DATA_DIR"] = temp_dir
+                os.environ["CHATGPT_LOCAL_AUTH_FILES"] = str(accounts_root / "acc01" / "auth.json")
+                os.environ["CHATGPT_LOCAL_AUTH_FILES_CONFIGURED"] = "1"
+
+                paths = _parse_auth_files_env()
+                self.assertEqual(paths, [str(accounts_root / "acc01" / "auth.json")])
+        finally:
+            if original_auth_files is None:
+                os.environ.pop("CHATGPT_LOCAL_AUTH_FILES", None)
+            else:
+                os.environ["CHATGPT_LOCAL_AUTH_FILES"] = original_auth_files
+            if original_data_dir is None:
+                os.environ.pop("CHATMOCK_DATA_DIR", None)
+            else:
+                os.environ["CHATMOCK_DATA_DIR"] = original_data_dir
+            if original_configured is None:
+                os.environ.pop("CHATGPT_LOCAL_AUTH_FILES_CONFIGURED", None)
+            else:
+                os.environ["CHATGPT_LOCAL_AUTH_FILES_CONFIGURED"] = original_configured
 
     def test_session_sticky_prefers_bound_candidate(self):
         candidates = [

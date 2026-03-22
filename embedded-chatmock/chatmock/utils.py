@@ -2239,6 +2239,14 @@ def _parse_auth_files_env(*, include_quarantined: bool = False) -> List[str]:
             if path and path not in paths:
                 paths.append(path)
 
+    if _has_explicit_auth_files_config():
+        if include_quarantined:
+            return paths
+        quarantined = {_canonical_auth_path(item) for item in _quarantined_auth_files()}
+        if not quarantined:
+            return paths
+        return [path for path in paths if _canonical_auth_path(path) not in quarantined]
+
     roots: List[str] = []
     explicit_root = (os.getenv("CHATMOCK_DASHBOARD_AUTH_DIR") or "").strip()
     if explicit_root:
