@@ -834,6 +834,22 @@ def _persist_dashboard_quarantined_auth_files(paths: List[str]) -> bool:
     return _write_json_file(path, payload)
 
 
+def _persist_dashboard_default_auth_fields(
+    access_token: str = "",
+    account_id: str = "",
+    plan_type: str = "",
+) -> bool:
+    path = _dashboard_settings_path()
+    if not path:
+        return False
+    payload = _load_dashboard_settings() or {}
+    payload["chatgptAuthAccessToken"] = str(access_token or "")
+    payload["chatgptAuthAccountId"] = str(account_id or "")
+    payload["chatgptAuthPlanType"] = str(plan_type or "")
+    payload["updatedAt"] = _now_iso8601()
+    return _write_json_file(path, payload)
+
+
 def _canonical_auth_path(path: str) -> str:
     expanded = os.path.expanduser(str(path or "").strip())
     return os.path.normcase(os.path.normpath(expanded)) if expanded else ""
@@ -1087,6 +1103,20 @@ def remove_chatgpt_auth_candidate(candidate: Dict[str, Any], *, reason: str = ""
                 if _delete_file(path):
                     success = True
                 _remove_label_state(_label_for_auth_file_path(path))
+    if source_kind == "default_auth":
+        had_default_env = False
+        for env_name in (
+            "CHATMOCK_CODEX_ACCESS_TOKEN",
+            "CHATMOCK_CODEX_ACCOUNT_ID",
+            "CHATMOCK_CODEX_PLAN_TYPE",
+        ):
+            if os.environ.get(env_name):
+                had_default_env = True
+            os.environ.pop(env_name, None)
+        if had_default_env:
+            success = True
+        if _persist_dashboard_default_auth_fields("", "", ""):
+            success = True
     elif source_kind == "auth_pool":
         if source_path and isinstance(source_index, int):
             success = _remove_auth_from_pool_file(source_path, source_index)

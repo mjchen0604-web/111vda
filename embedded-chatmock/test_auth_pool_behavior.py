@@ -246,6 +246,65 @@ class AuthPoolBehaviorTests(unittest.TestCase):
             else:
                 os.environ["CHATMOCK_DATA_DIR"] = original_data_dir
 
+    def test_remove_default_auth_clears_env_and_persisted_settings(self):
+        original_access = os.environ.get("CHATMOCK_CODEX_ACCESS_TOKEN")
+        original_account = os.environ.get("CHATMOCK_CODEX_ACCOUNT_ID")
+        original_plan = os.environ.get("CHATMOCK_CODEX_PLAN_TYPE")
+        original_settings_path = os.environ.get("CHATMOCK_DASHBOARD_SETTINGS_PATH")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                settings_path = Path(temp_dir) / "dashboard-settings.json"
+                settings_path.write_text(
+                    json.dumps(
+                        {
+                            "chatgptAuthAccessToken": "token-123",
+                            "chatgptAuthAccountId": "acct-123",
+                            "chatgptAuthPlanType": "team",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = str(settings_path)
+                os.environ["CHATMOCK_CODEX_ACCESS_TOKEN"] = "token-123"
+                os.environ["CHATMOCK_CODEX_ACCOUNT_ID"] = "acct-123"
+                os.environ["CHATMOCK_CODEX_PLAN_TYPE"] = "team"
+
+                removed = remove_chatgpt_auth_candidate(
+                    {
+                        "label": "default",
+                        "account_id": "acct-123",
+                        "source_kind": "default_auth",
+                        "source_path": "",
+                    },
+                    reason="invalid_api_key",
+                )
+                self.assertTrue(removed)
+                self.assertFalse(os.environ.get("CHATMOCK_CODEX_ACCESS_TOKEN"))
+                self.assertFalse(os.environ.get("CHATMOCK_CODEX_ACCOUNT_ID"))
+                self.assertFalse(os.environ.get("CHATMOCK_CODEX_PLAN_TYPE"))
+
+                saved = json.loads(settings_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved.get("chatgptAuthAccessToken"), "")
+                self.assertEqual(saved.get("chatgptAuthAccountId"), "")
+                self.assertEqual(saved.get("chatgptAuthPlanType"), "")
+        finally:
+            if original_access is None:
+                os.environ.pop("CHATMOCK_CODEX_ACCESS_TOKEN", None)
+            else:
+                os.environ["CHATMOCK_CODEX_ACCESS_TOKEN"] = original_access
+            if original_account is None:
+                os.environ.pop("CHATMOCK_CODEX_ACCOUNT_ID", None)
+            else:
+                os.environ["CHATMOCK_CODEX_ACCOUNT_ID"] = original_account
+            if original_plan is None:
+                os.environ.pop("CHATMOCK_CODEX_PLAN_TYPE", None)
+            else:
+                os.environ["CHATMOCK_CODEX_PLAN_TYPE"] = original_plan
+            if original_settings_path is None:
+                os.environ.pop("CHATMOCK_DASHBOARD_SETTINGS_PATH", None)
+            else:
+                os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = original_settings_path
+
     def test_probe_quarantines_only_invalid_credential(self):
         original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
         original_data_dir = os.environ.get("CHATMOCK_DATA_DIR")
