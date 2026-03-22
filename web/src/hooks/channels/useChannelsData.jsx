@@ -113,6 +113,7 @@ export const useChannelsData = () => {
 
   // 使用 ref 来避免闭包问题，类似旧版实现
   const shouldStopBatchTestingRef = useRef(false);
+  const authInvalidBatchStopRef = useRef(false);
 
   // Multi-key management states
   const [showMultiKeyManageModal, setShowMultiKeyManageModal] = useState(false);
@@ -867,7 +868,20 @@ export const useChannelsData = () => {
         return Promise.resolve();
       }
 
-      const { success, message, time } = res.data;
+      const { success, time } = res.data;
+      let message = res.data?.message;
+      const authInvalid =
+        typeof message === 'string' &&
+        /invalid_api_key|account unavailable/i.test(message);
+      if (isBatchTesting && record?.type === 58 && authInvalid) {
+        shouldStopBatchTestingRef.current = true;
+        if (!authInvalidBatchStopRef.current) {
+          authInvalidBatchStopRef.current = true;
+          message = `${message} · ${t(
+            '检测到无效账号，已停止后续批量测试，请先清理或刷新账号池',
+          )}`;
+        }
+      }
 
       // 更新测试结果
       setModelTestResults((prev) => ({
@@ -909,6 +923,22 @@ export const useChannelsData = () => {
     } catch (error) {
       // 处理网络错误
       const testKey = `${record.id}-${model}`;
+      let errorMessage = error.message || t('娴嬭瘯澶辫触');
+      const authInvalid = /invalid_api_key|account unavailable/i.test(
+        String(errorMessage),
+      );
+      if (isBatchTesting && record?.type === 58 && authInvalid) {
+        shouldStopBatchTestingRef.current = true;
+        if (!authInvalidBatchStopRef.current) {
+          authInvalidBatchStopRef.current = true;
+          errorMessage = `${errorMessage} · ${t(
+            '检测到无效账号，已停止后续批量测试，请先清理或刷新账号池',
+          )}`;
+        }
+      }
+      try {
+        error.message = errorMessage;
+      } catch (_) {}
       setModelTestResults((prev) => ({
         ...prev,
         [testKey]: {
@@ -948,6 +978,7 @@ export const useChannelsData = () => {
     }
 
     setIsBatchTesting(true);
+    authInvalidBatchStopRef.current = false;
     shouldStopBatchTestingRef.current = false; // 重置停止标志
 
     // 清空该渠道之前的测试结果
@@ -969,7 +1000,7 @@ export const useChannelsData = () => {
       );
 
       // 提高并发数量以加快测试速度，参考旧版的并发限制
-      const concurrencyLimit = 5;
+      const concurrencyLimit = currentTestChannel?.type === 58 ? 1 : 5;
       const results = [];
 
       for (let i = 0; i < models.length; i += concurrencyLimit) {
