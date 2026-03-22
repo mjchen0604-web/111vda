@@ -364,7 +364,7 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 
 func (c *ClaudeRequest) IsStream(ctx *gin.Context) bool {
 	if c.Stream == nil {
-		return false
+		return true
 	}
 	return *c.Stream
 }

@@ -184,6 +184,13 @@ def _resolve_prompt_mode(payload: Dict[str, Any]) -> str:
     return "default"
 
 
+def _resolve_stream_flag(payload: Dict[str, Any], default: bool = True) -> bool:
+    value = payload.get("stream")
+    if value is None:
+        return default
+    return bool(value)
+
+
 def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
     if _resolve_prompt_mode(payload) != "native":
         return _instructions_for_model(model)
@@ -1048,7 +1055,7 @@ def responses() -> Response:
 
     tool_choice = _normalize_responses_tool_choice(payload.get("tool_choice", "auto"))
     parallel_tool_calls = bool(payload.get("parallel_tool_calls", False))
-    stream_req = bool(payload.get("stream", False))
+    stream_req = _resolve_stream_flag(payload, True)
     model_reasoning = extract_reasoning_from_model_name(requested_model)
     service_tier = _resolve_service_tier(payload, requested_model)
     reasoning_overrides = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else model_reasoning
@@ -1352,7 +1359,7 @@ def chat_completions() -> Response:
             sys_msg = messages.pop(sys_idx)
             content = sys_msg.get("content") if isinstance(sys_msg, dict) else ""
             messages.insert(0, {"role": "user", "content": content})
-    is_stream = bool(payload.get("stream"))
+    is_stream = _resolve_stream_flag(payload, True)
     responses_compat_internal = bool(payload.get("_chatcore_responses_compat"))
     stream_options = payload.get("stream_options") if isinstance(payload.get("stream_options"), dict) else {}
     include_usage = bool(stream_options.get("include_usage", False))
@@ -1843,7 +1850,7 @@ def completions() -> Response:
         prompt = "".join([p if isinstance(p, str) else "" for p in prompt])
     if not isinstance(prompt, str):
         prompt = payload.get("suffix") or ""
-    stream_req = bool(payload.get("stream", False))
+    stream_req = _resolve_stream_flag(payload, True)
     stream_options = payload.get("stream_options") if isinstance(payload.get("stream_options"), dict) else {}
     include_usage = bool(stream_options.get("include_usage", False))
 

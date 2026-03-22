@@ -160,6 +160,39 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertNotIn("service_tier", anthropic_resp.get_json())
         self.assertNotIn("service_tier", ollama_resp.get_json())
 
+    def test_compat_routes_default_to_stream_when_stream_omitted(self):
+        def stub(model, input_items, **kwargs):
+            return DummyUpstream("resp_default_stream"), None
+
+        original_openai = routes_openai.start_upstream_request
+        original_anthropic = routes_anthropic.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        routes_anthropic.start_upstream_request = stub
+        try:
+            openai_resp = self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-5.4",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+            )
+            anthropic_resp = self.client.post(
+                "/v1/messages",
+                json={
+                    "model": "gpt-5.4",
+                    "max_tokens": 8,
+                    "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original_openai
+            routes_anthropic.start_upstream_request = original_anthropic
+
+        self.assertEqual(openai_resp.status_code, 200)
+        self.assertEqual(anthropic_resp.status_code, 200)
+        self.assertEqual(openai_resp.mimetype, "text/event-stream")
+        self.assertEqual(anthropic_resp.mimetype, "text/event-stream")
+
     def test_ollama_fast_preserves_requested_model_alias(self):
         def stub(model, input_items, **kwargs):
             return DummyUpstream("resp_ollama_fast"), None

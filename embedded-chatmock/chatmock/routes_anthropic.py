@@ -111,6 +111,13 @@ def _resolve_prompt_mode(payload: Dict[str, Any]) -> str:
     return "default"
 
 
+def _resolve_stream_flag(payload: Dict[str, Any], default: bool = True) -> bool:
+    value = payload.get("stream")
+    if value is None:
+        return default
+    return bool(value)
+
+
 def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
     if _resolve_prompt_mode(payload) != "native":
         return _instructions_for_model(model)
@@ -923,7 +930,7 @@ def messages() -> Response:
         extra_payload["previous_response_id"] = effective_previous_response_id
 
     model_out = requested_model or model
-    is_stream = bool(payload.get("stream"))
+    is_stream = _resolve_stream_flag(payload, True)
     attempt_limit = _upstream_attempt_limit(is_stream, model, service_tier)
     last_error_info: Dict[str, Any] | None = None
     upstream = None

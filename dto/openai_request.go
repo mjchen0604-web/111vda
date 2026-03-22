@@ -229,7 +229,7 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 }
 
 func (r *GeneralOpenAIRequest) IsStream(c *gin.Context) bool {
-	return lo.FromPtrOr(r.Stream, false)
+	return lo.FromPtrOr(r.Stream, true)
 }
 
 func (r *GeneralOpenAIRequest) SetModelName(modelName string) {
@@ -921,7 +921,7 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 }
 
 func (r *OpenAIResponsesRequest) IsStream(c *gin.Context) bool {
-	return lo.FromPtrOr(r.Stream, false)
+	return lo.FromPtrOr(r.Stream, true)
 }
 
 func (r *OpenAIResponsesRequest) SetModelName(modelName string) {

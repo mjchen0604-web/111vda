@@ -190,6 +190,45 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertNotIn('"service_tier"', body)
         self.assertNotIn("system_fingerprint", body)
 
+    def test_v1_responses_defaults_to_stream_when_stream_omitted(self):
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            return (
+                DummyUpstream(
+                    {
+                        "id": "resp_default_stream",
+                        "object": "response",
+                        "created_at": 123,
+                        "status": "completed",
+                        "model": model,
+                        "output": [],
+                        "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                    }
+                ),
+                None,
+            )
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello"}],
+                        }
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.mimetype, "text/event-stream")
+
     def test_v1_responses_infers_reasoning_and_fast_from_model_alias(self):
         captured = {}
 
