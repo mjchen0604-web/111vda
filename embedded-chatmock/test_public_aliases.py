@@ -29,13 +29,28 @@ class PublicAliasTests(unittest.TestCase):
         self.assertEqual(effort, "xhigh")
         self.assertEqual(service_tier, "fast")
 
-        base, effort, service_tier = split_model_alias("claude-sonnet-4-5")
+        base, effort, service_tier = split_model_alias("claude-opus-4-5")
         self.assertEqual(base, "gpt-5.4")
         self.assertEqual(effort, "high")
         self.assertEqual(service_tier, "fast")
 
-        base, effort, service_tier = split_model_alias("claude-haiku-4-5")
+        base, effort, service_tier = split_model_alias("claude-sonnet-4-6")
         self.assertEqual(base, "gpt-5.4")
+        self.assertEqual(effort, "medium")
+        self.assertEqual(service_tier, "fast")
+
+        base, effort, service_tier = split_model_alias("claude-sonnet-4-5")
+        self.assertEqual(base, "gpt-5.4")
+        self.assertEqual(effort, "low")
+        self.assertEqual(service_tier, "fast")
+
+        base, effort, service_tier = split_model_alias("claude-haiku-4-5")
+        self.assertEqual(base, "gpt-5.4-mini")
+        self.assertEqual(effort, "xhigh")
+        self.assertIsNone(service_tier)
+
+        base, effort, service_tier = split_model_alias("claude-haiku-3-5")
+        self.assertEqual(base, "gpt-5.4-mini")
         self.assertEqual(effort, "high")
         self.assertIsNone(service_tier)
 
@@ -62,11 +77,23 @@ class PublicAliasTests(unittest.TestCase):
         )
         self.assertEqual(
             public_model_name("gpt-5.4-fast-high"),
+            "claude-opus-4-5",
+        )
+        self.assertEqual(
+            public_model_name("gpt-5.4-fast-medium"),
+            "claude-sonnet-4-6",
+        )
+        self.assertEqual(
+            public_model_name("gpt-5.4-fast-low"),
             "claude-sonnet-4-5",
         )
         self.assertEqual(
-            public_model_name("gpt-5.4-high"),
+            public_model_name("gpt-5.4-mini-xhigh"),
             "claude-haiku-4-5",
+        )
+        self.assertEqual(
+            public_model_name("gpt-5.4-mini-high"),
+            "claude-haiku-3-5",
         )
 
 

@@ -65,8 +65,11 @@ class UpstreamRoutingTests(unittest.TestCase):
             self.assertEqual(_ollama_instructions_for_model("gpt-5.4-fast-xhigh"), "codex-template")
             self.assertEqual(_instructions_for_model("gpt-5-codex"), "codex-template")
             self.assertEqual(_instructions_for_model("claude-opus-4-6"), "claude-template")
+            self.assertEqual(_anthropic_instructions_for_model("claude-opus-4-5"), "claude-template")
+            self.assertEqual(_anthropic_instructions_for_model("claude-sonnet-4-6"), "claude-template")
             self.assertEqual(_anthropic_instructions_for_model("claude-sonnet-4-5"), "claude-template")
             self.assertEqual(_ollama_instructions_for_model("claude-haiku-4-5"), "claude-template")
+            self.assertEqual(_ollama_instructions_for_model("claude-haiku-3-5"), "claude-template")
 
     def test_native_prompt_mode_can_produce_empty_template(self):
         app = Flask(__name__)

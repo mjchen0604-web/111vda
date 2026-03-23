@@ -6,13 +6,21 @@ from typing import Any, Dict, Set
 DEFAULT_REASONING_EFFORTS: Set[str] = {"minimal", "low", "medium", "high", "xhigh"}
 MODEL_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 VALID_REASONING_COMPAT = {"legacy", "o3", "current"}
-PUBLIC_MODEL_ALIAS_TO_INTERNAL = {
-    "claude-opus-4-6": "gpt-5.4-fast-xhigh",
-    "claude-sonnet-4-5": "gpt-5.4-fast-high",
-    "claude-haiku-4-5": "gpt-5.4-high",
+PUBLIC_MODEL_ALIAS_PARTS = {
+    "claude-opus-4-6": ("gpt-5.4", "xhigh", "fast"),
+    "claude-opus-4-5": ("gpt-5.4", "high", "fast"),
+    "claude-sonnet-4-6": ("gpt-5.4", "medium", "fast"),
+    "claude-sonnet-4-5": ("gpt-5.4", "low", "fast"),
+    "claude-haiku-4-5": ("gpt-5.4-mini", "xhigh", None),
+    "claude-haiku-3-5": ("gpt-5.4-mini", "high", None),
 }
 INTERNAL_MODEL_TO_PUBLIC_ALIAS = {
-    value: key for key, value in PUBLIC_MODEL_ALIAS_TO_INTERNAL.items()
+    "gpt-5.4-fast-xhigh": "claude-opus-4-6",
+    "gpt-5.4-fast-high": "claude-opus-4-5",
+    "gpt-5.4-fast-medium": "claude-sonnet-4-6",
+    "gpt-5.4-fast-low": "claude-sonnet-4-5",
+    "gpt-5.4-mini-xhigh": "claude-haiku-4-5",
+    "gpt-5.4-mini-high": "claude-haiku-3-5",
 }
 
 
@@ -34,8 +42,8 @@ def split_model_alias(model: str | None) -> tuple[str, str | None, str | None]:
     base = model.strip().lower()
     if not base:
         return "", None, None
-    if base in PUBLIC_MODEL_ALIAS_TO_INTERNAL:
-        return split_model_alias(PUBLIC_MODEL_ALIAS_TO_INTERNAL[base])
+    if base in PUBLIC_MODEL_ALIAS_PARTS:
+        return PUBLIC_MODEL_ALIAS_PARTS[base]
 
     effort: str | None = None
     service_tier: str | None = None

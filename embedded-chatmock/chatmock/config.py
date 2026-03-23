@@ -65,4 +65,4 @@ def should_use_claude_opus_instructions(model: str | None) -> bool:
     normalized = str(model or "").strip().lower()
     if not normalized:
         return False
-    return normalized.startswith("claude-opus-4-6") or normalized.startswith("claude-sonnet-4-5") or normalized.startswith("claude-haiku-4-5")
+    return normalized.startswith("claude-")
