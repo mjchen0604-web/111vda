@@ -20,6 +20,7 @@ from .reasoning import (
 from .upstream_errors import (
     build_anthropic_error_response,
     build_error_info,
+    current_request_id,
     error_info_from_event_response,
     error_info_from_flask_response,
     error_info_from_http_response,
@@ -118,6 +119,40 @@ def _resolve_stream_flag(payload: Dict[str, Any], default: bool = True) -> bool:
     return bool(value)
 
 
+def _set_anthropic_request_id_headers(response: Response) -> Response:
+    request_id = current_request_id()
+    if request_id:
+        response.headers.setdefault("request-id", request_id)
+    return response
+
+
+def _is_prefill_deprecated_model(model: str | None) -> bool:
+    normalized = str(model or "").strip().lower()
+    if not normalized:
+        return False
+    return (
+        normalized.startswith("claude-opus-4-6")
+        or normalized.startswith("claude-sonnet-4-6")
+        or normalized.startswith("claude-sonnet-4-5")
+        or normalized.startswith("claude-opus-4.6")
+        or normalized.startswith("claude-sonnet-4.6")
+        or normalized.startswith("claude-sonnet-4.5")
+    )
+
+
+def _has_tail_assistant_prefill(messages: Any) -> bool:
+    if not isinstance(messages, list) or not messages:
+        return False
+    for item in reversed(messages):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role == "system":
+            continue
+        return role == "assistant"
+    return False
+
+
 def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
     if _resolve_prompt_mode(payload) != "native":
         return _instructions_for_model(model)
@@ -149,7 +184,12 @@ def _resolve_service_tier(payload: Dict[str, Any], requested_model: str | None =
 
 def _error_response(message: str, status: int = 400, err_type: str = "invalid_request_error") -> Response:
     payload = {"type": "error", "error": {"type": err_type, "message": message}}
+    request_id = current_request_id()
+    if request_id:
+        payload["request_id"] = request_id
     resp = make_response(jsonify(payload), status)
+    if request_id:
+        resp.headers.setdefault("request-id", request_id)
     for k, v in build_cors_headers().items():
         resp.headers.setdefault(k, v)
     return resp
@@ -860,6 +900,17 @@ def messages() -> Response:
 
     requested_model = payload.get("model")
     model = normalize_model_name(requested_model, debug_model)
+    if _is_prefill_deprecated_model(requested_model) and _has_tail_assistant_prefill(payload.get("messages")):
+        message = (
+            "Prefill is deprecated for Claude Opus 4.6, Claude Sonnet 4.6, "
+            "and Claude Sonnet 4.5. Use structured output or system instructions instead."
+        )
+        _log_invalid_request_diagnostic(
+            "INVALID REQUEST /v1/messages local_validation",
+            payload=payload,
+            error_info=_local_invalid_request_info(message),
+        )
+        return _error_response(message, 400, "invalid_request_error")
 
     input_items, msg_err = _convert_anthropic_messages_to_input(payload.get("messages"))
     if msg_err:
@@ -1074,7 +1125,7 @@ def messages() -> Response:
         )
         for k, v in build_cors_headers().items():
             resp.headers.setdefault(k, v)
-        return resp
+        return _set_anthropic_request_id_headers(resp)
 
     completed_upstream = upstream
     result = _consume_anthropic_nonstream(
@@ -1127,4 +1178,4 @@ def messages() -> Response:
     resp = make_response(jsonify(message_obj), completed_upstream.status_code)
     for k, v in build_cors_headers().items():
         resp.headers.setdefault(k, v)
-    return resp
+    return _set_anthropic_request_id_headers(resp)

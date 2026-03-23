@@ -6,7 +6,7 @@ import os
 import re
 from typing import Any, Mapping
 
-from flask import Response, current_app, has_app_context, jsonify, make_response
+from flask import Response, current_app, has_app_context, has_request_context, jsonify, make_response, request
 
 from .http import build_cors_headers
 
@@ -451,6 +451,17 @@ def normalized_error_payload(info: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def current_request_id() -> str:
+    if has_request_context():
+        try:
+            value = _compact_string(request.headers.get("X-Oneapi-Request-Id"))
+            if value:
+                return value
+        except Exception:
+            pass
+    return ""
+
+
 def should_retry_next_candidate(info: Mapping[str, Any]) -> bool:
     return classify_error(info) in ("insufficient_balance", "rate_limited", "account_invalid") or extract_retry_after_unlock_ts(info) is not None
 
@@ -464,8 +475,13 @@ def build_openai_error_response(info: Mapping[str, Any]) -> Response:
 
 
 def build_anthropic_error_response(info: Mapping[str, Any]) -> Response:
+    request_id = current_request_id()
     payload = {"type": "error", "error": normalized_error_payload(info)}
+    if request_id:
+        payload["request_id"] = request_id
     response = make_response(jsonify(payload), normalized_http_status(info))
+    if request_id:
+        response.headers.setdefault("request-id", request_id)
     for key, value in build_cors_headers().items():
         response.headers.setdefault(key, value)
     return response
