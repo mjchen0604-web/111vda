@@ -17,6 +17,7 @@ from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
     _flatten_response_history_items,
     _is_generic_invalid_request,
+    _should_mutate_candidate_state,
     _is_undefined_text_value,
     _minimize_responses_payload,
     _sanitize_orphan_function_call_outputs,
@@ -221,6 +222,13 @@ class UpstreamRoutingTests(unittest.TestCase):
         self.assertNotIn("instructions", minimized)
         self.assertNotIn("service_tier", minimized)
         self.assertNotIn("include", minimized)
+
+    def test_channel_test_header_disables_candidate_state_mutation(self):
+        app = Flask(__name__)
+        with app.test_request_context(headers={"X-ChatCore-Test": "1"}):
+            self.assertFalse(_should_mutate_candidate_state())
+        with app.test_request_context(headers={}):
+            self.assertTrue(_should_mutate_candidate_state())
 
 
 if __name__ == "__main__":

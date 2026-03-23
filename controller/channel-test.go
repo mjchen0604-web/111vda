@@ -233,6 +233,7 @@ func testChannelOnce(channel *model.Channel, testModel string, endpointType stri
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("X-ChatCore-Test", "1")
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
 	group, _ := model.GetUserGroup(1, false)

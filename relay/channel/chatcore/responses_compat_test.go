@@ -132,6 +132,29 @@ func TestResponsesRequestToChatCompletionsRequestStripsBuiltInSearchTools(t *tes
 	}
 }
 
+func TestSetupRequestHeaderPassesChatCoreTestMarker(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("X-ChatCore-Test", "1")
+	ctx.Request = req
+
+	headers := http.Header{}
+	adaptor := Adaptor{}
+	if err := adaptor.SetupRequestHeader(
+		ctx,
+		&headers,
+		&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ApiKey: "sk-test"}},
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if headers.Get("X-ChatCore-Test") != "1" {
+		t.Fatalf("expected X-ChatCore-Test header to be forwarded, got %#v", headers.Get("X-ChatCore-Test"))
+	}
+}
+
 func TestChatcoreAdaptorConvertResponsesRequestRewritesPath(t *testing.T) {
 	adaptor := &Adaptor{}
 	info := &relaycommon.RelayInfo{

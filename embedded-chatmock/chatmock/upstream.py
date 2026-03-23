@@ -326,6 +326,18 @@ def _post_with_invalid_request_fallback(
     return upstream, current_payload
 
 
+def _should_mutate_candidate_state() -> bool:
+    try:
+        marker = (
+            flask_request.headers.get("X-ChatCore-Test")
+            or flask_request.headers.get("X-Channel-Test")
+            or ""
+        )
+    except Exception:
+        marker = ""
+    return str(marker).strip().lower() not in ("1", "true", "yes", "on")
+
+
 def _normalize_service_tier(service_tier: str | None) -> str | None:
     if not isinstance(service_tier, str) or not service_tier.strip():
         return None
@@ -513,7 +525,8 @@ def _start_chatgpt_backend_request(
                 )
             except requests.RequestException as exc:
                 last_exception = exc
-                mark_chatgpt_auth_result(label, success=False, account_id=account_id, error_message=str(exc))
+                if _should_mutate_candidate_state():
+                    mark_chatgpt_auth_result(label, success=False, account_id=account_id, error_message=str(exc))
                 release_chatgpt_connection_slot(slot_id)
                 _release_auth_candidate_slot(candidate)
                 if verbose:
@@ -528,7 +541,8 @@ def _start_chatgpt_backend_request(
 
             if should_retry:
                 error_info = error_info_from_http_response("upstream", "http", upstream)
-                handle_chatgpt_candidate_failure(candidate, error_info)
+                if _should_mutate_candidate_state():
+                    handle_chatgpt_candidate_failure(candidate, error_info)
                 _release_auth_candidate_slot(candidate)
                 if has_more_candidates or has_more_rounds:
                     if verbose:

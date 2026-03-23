@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -37,6 +38,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	}
 	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
 		req.Set(common.RequestIdKey, requestID)
+	}
+	if testMarker := c.Request.Header.Get("X-ChatCore-Test"); strings.TrimSpace(testMarker) != "" {
+		req.Set("X-ChatCore-Test", testMarker)
 	}
 	return nil
 }
