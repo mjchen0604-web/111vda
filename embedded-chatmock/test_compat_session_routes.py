@@ -214,6 +214,40 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json().get("model"), "gpt-5.4-fast")
 
+    def test_anthropic_messages_maps_common_fields_to_responses_payload(self):
+        captured = {}
+
+        def stub(model, input_items, **kwargs):
+            captured["extra_payload"] = dict(kwargs.get("extra_payload") or {})
+            return DummyUpstream("resp_anthropic_passthrough"), None
+
+        original = routes_anthropic.start_upstream_request
+        routes_anthropic.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/messages",
+                json={
+                    "model": "gpt-5.4",
+                    "max_tokens": 77,
+                    "temperature": 0.2,
+                    "top_p": 0.9,
+                    "metadata": {"source": "cc"},
+                    "mcp_servers": [{"name": "demo"}],
+                    "context_management": {"mode": "windowed"},
+                    "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                },
+            )
+        finally:
+            routes_anthropic.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(captured["extra_payload"].get("max_output_tokens"), 77)
+        self.assertEqual(captured["extra_payload"].get("temperature"), 0.2)
+        self.assertEqual(captured["extra_payload"].get("top_p"), 0.9)
+        self.assertEqual(captured["extra_payload"].get("metadata"), {"source": "cc"})
+        self.assertEqual(captured["extra_payload"].get("mcp_servers"), [{"name": "demo"}])
+        self.assertEqual(captured["extra_payload"].get("context_management"), {"mode": "windowed"})
+
     def test_chat_completions_does_not_resume_previous_response_id_by_default(self):
         calls = []
 

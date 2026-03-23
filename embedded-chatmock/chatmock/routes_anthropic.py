@@ -153,6 +153,30 @@ def _has_tail_assistant_prefill(messages: Any) -> bool:
     return False
 
 
+def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    extra: Dict[str, Any] = {}
+    passthrough_keys = (
+        "metadata",
+        "mcp_servers",
+        "context_management",
+        "temperature",
+        "top_p",
+    )
+    for key in passthrough_keys:
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if value is None:
+            continue
+        extra[key] = value
+
+    max_tokens = payload.get("max_tokens")
+    if isinstance(max_tokens, int) and max_tokens >= 0:
+        extra["max_output_tokens"] = max_tokens
+
+    return extra
+
+
 def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
     if _resolve_prompt_mode(payload) != "native":
         return _instructions_for_model(model)
@@ -976,6 +1000,7 @@ def messages() -> Response:
     extra_payload = {}
     if effective_previous_response_id:
         extra_payload["previous_response_id"] = effective_previous_response_id
+    extra_payload.update(_build_anthropic_extra_payload(payload))
 
     model_out = requested_model or model
     is_stream = _resolve_stream_flag(payload, True)
