@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 )
 
 func TestBuildResponsesTestInputUsesMessageBlocks(t *testing.T) {
@@ -64,6 +66,24 @@ func TestBuildResponsesTestRequestSetsOfficialStyleDefaults(t *testing.T) {
 	}
 	if len(decoded.Input) == 0 {
 		t.Fatalf("input should survive roundtrip")
+	}
+}
+
+func TestNormalizeChannelTestEndpointDefaultsChatCoreGpt5ToResponses(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeChatCore}
+
+	got := normalizeChannelTestEndpoint(channel, "gpt-5.4-fast-xhigh", "")
+	if got != string(constant.EndpointTypeOpenAIResponse) {
+		t.Fatalf("unexpected endpoint type: %s", got)
+	}
+}
+
+func TestNormalizeChannelTestEndpointKeepsExplicitSelection(t *testing.T) {
+	channel := &model.Channel{Type: constant.ChannelTypeChatCore}
+
+	got := normalizeChannelTestEndpoint(channel, "gpt-5.4-fast-xhigh", string(constant.EndpointTypeOpenAI))
+	if got != string(constant.EndpointTypeOpenAI) {
+		t.Fatalf("unexpected endpoint type: %s", got)
 	}
 }
 

@@ -87,10 +87,33 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
 		return string(constant.EndpointTypeOpenAIResponseCompact)
 	}
+	if shouldUseResponsesEndpointForChannelTest(channel, modelName) {
+		return string(constant.EndpointTypeOpenAIResponse)
+	}
 	if channel != nil && channel.Type == constant.ChannelTypeCodex {
 		return string(constant.EndpointTypeOpenAIResponse)
 	}
 	return normalized
+}
+
+func shouldUseResponsesEndpointForChannelTest(channel *model.Channel, modelName string) bool {
+	if channel == nil {
+		return false
+	}
+	if channel.Type == constant.ChannelTypeCodex {
+		return true
+	}
+	if channel.Type != constant.ChannelTypeChatCore {
+		return false
+	}
+	normalized := strings.TrimSpace(strings.ToLower(modelName))
+	if normalized == "" {
+		return false
+	}
+	if strings.Contains(normalized, "codex") {
+		return true
+	}
+	return strings.HasPrefix(normalized, "gpt-5") || strings.HasPrefix(normalized, "gpt5")
 }
 
 func shouldRetryChannelTestResult(result testResult, remaining int) bool {
