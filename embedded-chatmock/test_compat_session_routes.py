@@ -231,9 +231,15 @@ class CompatSessionRouteTests(unittest.TestCase):
                     "max_tokens": 77,
                     "temperature": 0.2,
                     "top_p": 0.9,
+                    "top_k": 10,
                     "metadata": {"source": "cc"},
                     "mcp_servers": [{"name": "demo"}],
                     "context_management": {"mode": "windowed"},
+                    "container": {"id": "container_demo"},
+                    "output_config": {"format": "json"},
+                    "output_format": {"type": "json_schema"},
+                    "inference_geo": "eu",
+                    "stop_sequences": ["STOP"],
                     "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
                 },
             )
@@ -244,9 +250,15 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(captured["extra_payload"].get("max_output_tokens"), 77)
         self.assertEqual(captured["extra_payload"].get("temperature"), 0.2)
         self.assertEqual(captured["extra_payload"].get("top_p"), 0.9)
+        self.assertEqual(captured["extra_payload"].get("top_k"), 10)
         self.assertEqual(captured["extra_payload"].get("metadata"), {"source": "cc"})
         self.assertEqual(captured["extra_payload"].get("mcp_servers"), [{"name": "demo"}])
         self.assertEqual(captured["extra_payload"].get("context_management"), {"mode": "windowed"})
+        self.assertEqual(captured["extra_payload"].get("container"), {"id": "container_demo"})
+        self.assertEqual(captured["extra_payload"].get("output_config"), {"format": "json"})
+        self.assertEqual(captured["extra_payload"].get("output_format"), {"type": "json_schema"})
+        self.assertEqual(captured["extra_payload"].get("inference_geo"), "eu")
+        self.assertEqual(captured["extra_payload"].get("stop_sequences"), ["STOP"])
 
     def test_chat_completions_does_not_resume_previous_response_id_by_default(self):
         calls = []

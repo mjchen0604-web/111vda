@@ -159,8 +159,13 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "metadata",
         "mcp_servers",
         "context_management",
+        "container",
+        "output_config",
+        "output_format",
+        "inference_geo",
         "temperature",
         "top_p",
+        "top_k",
     )
     for key in passthrough_keys:
         if key not in payload:
@@ -173,6 +178,12 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     max_tokens = payload.get("max_tokens")
     if isinstance(max_tokens, int) and max_tokens >= 0:
         extra["max_output_tokens"] = max_tokens
+
+    stop_sequences = payload.get("stop_sequences")
+    if isinstance(stop_sequences, list):
+        filtered = [item for item in stop_sequences if isinstance(item, str) and item]
+        if filtered:
+            extra["stop_sequences"] = filtered
 
     return extra
 
