@@ -247,7 +247,7 @@ class CompatSessionRouteTests(unittest.TestCase):
             routes_anthropic.start_upstream_request = original
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(captured["extra_payload"].get("max_output_tokens"), 77)
+        self.assertNotIn("max_output_tokens", captured["extra_payload"])
         self.assertEqual(captured["extra_payload"].get("temperature"), 0.2)
         self.assertEqual(captured["extra_payload"].get("top_p"), 0.9)
         self.assertEqual(captured["extra_payload"].get("top_k"), 10)
@@ -292,7 +292,7 @@ class CompatSessionRouteTests(unittest.TestCase):
             routes_anthropic.start_upstream_request = original
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(captured["extra_payload"].get("max_output_tokens"), 4096)
+        self.assertNotIn("max_output_tokens", captured["extra_payload"])
         self.assertNotIn("temperature", captured["extra_payload"])
         self.assertNotIn("top_k", captured["extra_payload"])
         self.assertNotIn("top_p", captured["extra_payload"])

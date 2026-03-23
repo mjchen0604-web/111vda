@@ -184,10 +184,6 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             continue
         extra[key] = value
 
-    max_tokens = payload.get("max_tokens")
-    if isinstance(max_tokens, int) and max_tokens >= 0:
-        extra["max_output_tokens"] = max_tokens
-
     stop_sequences = payload.get("stop_sequences")
     if _is_undefined_text_value(stop_sequences):
         stop_sequences = None
