@@ -27,6 +27,10 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 	if normalized != "" && normalized != modelName {
 		return isChannelIDInList(group2model2channels[group][normalized], channelID)
 	}
+	aliased := common.ResolveSkinnedModelAlias(modelName)
+	if aliased != "" && aliased != modelName {
+		return isChannelIDInList(group2model2channels[group][aliased], channelID)
+	}
 	return false
 }
 
@@ -52,7 +56,15 @@ func isChannelEnabledForGroupModelDB(group string, modelName string, channelID i
 	}
 	normalized := ratio_setting.FormatMatchingModelName(modelName)
 	if normalized == "" || normalized == modelName {
-		return false
+		aliased := common.ResolveSkinnedModelAlias(modelName)
+		if aliased == "" || aliased == modelName {
+			return false
+		}
+		count = 0
+		err = DB.Model(&Ability{}).
+			Where(commonGroupCol+" = ? and model = ? and channel_id = ? and enabled = ?", group, aliased, channelID, true).
+			Count(&count).Error
+		return err == nil && count > 0
 	}
 	count = 0
 	err = DB.Model(&Ability{}).

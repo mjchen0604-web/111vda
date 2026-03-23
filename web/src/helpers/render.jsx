@@ -733,6 +733,16 @@ export function stringToColor(str) {
 // 渲染带有模型图标的标签
 export function toPublicModelName(modelName) {
   if (!modelName || typeof modelName !== 'string') return modelName;
+  const map = {
+    'gpt-5.4-fast-xhigh': 'claude-opus-4-6',
+    'gpt-5.4-fast-high': 'claude-opus-4-5',
+    'gpt-5.4-fast-medium': 'claude-sonnet-4-6',
+    'gpt-5.4-fast-low': 'claude-sonnet-4-5',
+    'gpt-5.4-mini-xhigh': 'claude-haiku-4-5',
+    'gpt-5.4-mini-high': 'claude-haiku-3-5',
+  };
+  const normalized = modelName.trim().toLowerCase();
+  if (map[normalized]) return map[normalized];
   return modelName;
 }
 

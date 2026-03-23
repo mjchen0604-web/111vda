@@ -92,6 +92,11 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 	if endpoints, ok := modelSupportEndpointTypes[model]; ok {
 		return endpoints
 	}
+	if aliased := common.ResolveSkinnedModelAlias(model); aliased != "" && aliased != model {
+		if endpoints, ok := modelSupportEndpointTypes[aliased]; ok {
+			return endpoints
+		}
+	}
 	return make([]constant.EndpointType, 0)
 }
 

@@ -24,7 +24,7 @@ func allowUnsetRatioForRelayModel(info *relaycommon.RelayInfo) bool {
 	if info.UsingGroup == "" || info.OriginModelName == "" {
 		return false
 	}
-	return model.HasEnabledChannelTypeForModel(info.UsingGroup, info.OriginModelName, constant.ChannelTypeChatCore)
+	return model.HasEnabledChannelTypeForModel(info.UsingGroup, common.ResolveBillingModelName(info.OriginModelName, info.ChannelType), constant.ChannelTypeChatCore)
 }
 
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
@@ -52,7 +52,8 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
-	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
+	billingModelName := common.ResolveBillingModelName(info.OriginModelName, info.ChannelType)
+	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 	groupRatioInfo := HandleGroupRatio(c, info)
 
 	var preConsumedQuota int
@@ -76,31 +77,31 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 		var success bool
 		var matchName string
-		modelRatio, success, matchName = ratio_setting.GetModelRatio(info.OriginModelName)
+		modelRatio, success, matchName = ratio_setting.GetModelRatio(billingModelName)
 		if !success && !allowUnsetRatioForRelayModel(info) {
 			return types.PriceData{}, fmt.Errorf("model %s ratio or price not set, please set or start self-use mode", matchName)
 		}
 
-		consumeRatio = ratio_setting.GetModelConsumeRatio(info.OriginModelName)
-		completionRatio = ratio_setting.GetCompletionRatio(info.OriginModelName)
-		cacheRatio, _ = ratio_setting.GetCacheRatio(info.OriginModelName)
-		cacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(info.OriginModelName)
+		consumeRatio = ratio_setting.GetModelConsumeRatio(billingModelName)
+		completionRatio = ratio_setting.GetCompletionRatio(billingModelName)
+		cacheRatio, _ = ratio_setting.GetCacheRatio(billingModelName)
+		cacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(billingModelName)
 		cacheCreationRatio5m = cacheCreationRatio
 		cacheCreationRatio1h = cacheCreationRatio * claudeCacheCreation1hMultiplier
-		imageRatio, _ = ratio_setting.GetImageRatio(info.OriginModelName)
-		audioRatio = ratio_setting.GetAudioRatio(info.OriginModelName)
-		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(info.OriginModelName)
+		imageRatio, _ = ratio_setting.GetImageRatio(billingModelName)
+		audioRatio = ratio_setting.GetAudioRatio(billingModelName)
+		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(billingModelName)
 		ratio := modelRatio * groupRatioInfo.GroupRatio
 		preConsumedQuota = int(float64(preConsumedTokens) * ratio * consumeRatio)
 	} else {
-		consumeRatio = ratio_setting.GetModelConsumeRatio(info.OriginModelName)
+		consumeRatio = ratio_setting.GetModelConsumeRatio(billingModelName)
 		if meta.ImagePriceRatio != 0 {
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
 		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio * consumeRatio)
 	}
 
-	longContextMultiplier := ratio_setting.GetLongContextPricingMultiplier(info.OriginModelName, promptTokens)
+	longContextMultiplier := ratio_setting.GetLongContextPricingMultiplier(billingModelName, promptTokens)
 	if !usePrice && longContextMultiplier > 1 {
 		preConsumedQuota = int(float64(preConsumedQuota) * longContextMultiplier)
 	}
@@ -149,15 +150,16 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
-	consumeRatio := ratio_setting.GetModelConsumeRatio(info.OriginModelName)
+	billingModelName := common.ResolveBillingModelName(info.OriginModelName, info.ChannelType)
+	consumeRatio := ratio_setting.GetModelConsumeRatio(billingModelName)
 
-	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
+	modelPrice, success := ratio_setting.GetModelPrice(billingModelName, true)
 	if !success {
-		defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[info.OriginModelName]
+		defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[billingModelName]
 		if ok {
 			modelPrice = defaultPrice
 		} else {
-			_, ratioSuccess, matchName := ratio_setting.GetModelRatio(info.OriginModelName)
+			_, ratioSuccess, matchName := ratio_setting.GetModelRatio(billingModelName)
 			if !ratioSuccess && !allowUnsetRatioForRelayModel(info) {
 				return types.PriceData{}, fmt.Errorf("model %s ratio or price not set, please set or start self-use mode", matchName)
 			}

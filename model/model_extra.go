@@ -1,5 +1,7 @@
 package model
 
+import "github.com/QuantumNous/new-api/common"
+
 func GetModelEnableGroups(modelName string) []string {
 	// 确保缓存最新
 	GetPricing()
@@ -12,6 +14,14 @@ func GetModelEnableGroups(modelName string) []string {
 	groups, ok := modelEnableGroups[modelName]
 	modelEnableGroupsLock.RUnlock()
 	if !ok {
+		if aliased := common.ResolveSkinnedModelAlias(modelName); aliased != "" && aliased != modelName {
+			modelEnableGroupsLock.RLock()
+			groups, ok = modelEnableGroups[aliased]
+			modelEnableGroupsLock.RUnlock()
+			if ok {
+				return groups
+			}
+		}
 		return make([]string, 0)
 	}
 	return groups
@@ -25,6 +35,14 @@ func GetModelQuotaTypes(modelName string) []int {
 	quota, ok := modelQuotaTypeMap[modelName]
 	modelEnableGroupsLock.RUnlock()
 	if !ok {
+		if aliased := common.ResolveSkinnedModelAlias(modelName); aliased != "" && aliased != modelName {
+			modelEnableGroupsLock.RLock()
+			quota, ok = modelQuotaTypeMap[aliased]
+			modelEnableGroupsLock.RUnlock()
+			if ok {
+				return []int{quota}
+			}
+		}
 		return []int{}
 	}
 	return []int{quota}

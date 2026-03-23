@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -8,8 +9,35 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func exposePricingModels(pricing []model.Pricing) []model.Pricing {
+	if len(pricing) == 0 {
+		return pricing
+	}
+	rawSet := make(map[string]struct{}, len(pricing))
+	for _, item := range pricing {
+		rawSet[item.ModelName] = struct{}{}
+	}
+	result := make([]model.Pricing, 0, len(pricing))
+	for _, item := range pricing {
+		alias, ok := common.FindModelSkinAliasByInternal(item.ModelName)
+		if !ok {
+			result = append(result, item)
+			continue
+		}
+		if _, exists := rawSet[alias.PublicName]; exists {
+			continue
+		}
+		item.ModelName = alias.PublicName
+		if item.Icon == "" {
+			item.Icon = alias.Icon
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
 func GetPricing(c *gin.Context) {
-	pricing := model.GetPricing()
+	pricing := exposePricingModels(model.GetPricing())
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}

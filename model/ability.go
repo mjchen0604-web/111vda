@@ -56,16 +56,23 @@ func HasEnabledChannelTypeForModel(group string, modelName string, channelType i
 	if group == "" || modelName == "" {
 		return false
 	}
-	var count int64
-	err := DB.Table("abilities").
-		Joins("left join channels on abilities.channel_id = channels.id").
-		Where("abilities."+commonGroupCol+" = ? and abilities.model = ? and abilities.enabled = ? and channels.type = ?",
-			group, modelName, true, channelType).
-		Count(&count).Error
-	if err != nil {
-		return false
+	lookupNames := []string{modelName}
+	normalizedModel := common.ResolveSkinnedModelAlias(modelName)
+	if normalizedModel != "" && normalizedModel != modelName {
+		lookupNames = append(lookupNames, normalizedModel)
 	}
-	return count > 0
+	for _, lookupName := range lookupNames {
+		var count int64
+		err := DB.Table("abilities").
+			Joins("left join channels on abilities.channel_id = channels.id").
+			Where("abilities."+commonGroupCol+" = ? and abilities.model = ? and abilities.enabled = ? and channels.type = ?",
+				group, lookupName, true, channelType).
+			Count(&count).Error
+		if err == nil && count > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func HasEnabledChatCoreForModel(group string, modelName string) bool {
@@ -116,7 +123,22 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 			}
 		}
 	} else {
-		return nil, nil
+		aliasedModel := common.ResolveSkinnedModelAlias(model)
+		if aliasedModel != "" && aliasedModel != model {
+			channelQuery, err = getChannelQuery(group, aliasedModel, retry)
+			if err != nil {
+				return nil, err
+			}
+			err = channelQuery.Order("weight DESC").Find(&abilities).Error
+			if err != nil {
+				return nil, err
+			}
+			if len(abilities) == 0 {
+				return nil, nil
+			}
+		} else {
+			return nil, nil
+		}
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err

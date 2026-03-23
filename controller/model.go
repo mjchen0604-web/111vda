@@ -29,6 +29,37 @@ var openAIModels []dto.OpenAIModels
 var openAIModelsMap map[string]dto.OpenAIModels
 var channelId2Models map[int][]string
 
+func exposedRequesterModelName(modelName string) string {
+	return common.PublicSkinnedModelName(modelName)
+}
+
+func buildExposedOpenAIModel(modelName string) dto.OpenAIModels {
+	exposedName := exposedRequesterModelName(modelName)
+	if exposedName != modelName {
+		if oaiModel, ok := openAIModelsMap[modelName]; ok {
+			oaiModel.Id = exposedName
+			oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
+			return oaiModel
+		}
+	}
+	if oaiModel, ok := openAIModelsMap[exposedName]; ok {
+		oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
+		return oaiModel
+	}
+	if oaiModel, ok := openAIModelsMap[modelName]; ok {
+		oaiModel.Id = exposedName
+		oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
+		return oaiModel
+	}
+	return dto.OpenAIModels{
+		Id:                     exposedName,
+		Object:                 "model",
+		Created:                1626777600,
+		OwnedBy:                "custom",
+		SupportedEndpointTypes: model.GetModelSupportEndpointTypes(modelName),
+	}
+}
+
 func shouldExposeModelToRequester(c *gin.Context, modelName string, acceptUnsetRatioModel bool) bool {
 	if acceptUnsetRatioModel {
 		return true
@@ -127,6 +158,16 @@ func init() {
 	for _, aiModel := range openAIModels {
 		openAIModelsMap[aiModel.Id] = aiModel
 	}
+	for _, alias := range common.PublicModelAliases() {
+		if _, exists := openAIModelsMap[alias.PublicName]; exists {
+			continue
+		}
+		if internal, ok := openAIModelsMap[alias.InternalName]; ok {
+			internal.Id = alias.PublicName
+			openAIModels = append(openAIModels, internal)
+			openAIModelsMap[alias.PublicName] = internal
+		}
+	}
 	channelId2Models = make(map[int][]string)
 	for i := 1; i <= constant.ChannelTypeDummy; i++ {
 		apiType, success := common.ChannelType2APIType(i)
@@ -140,6 +181,7 @@ func init() {
 		adaptor.Init(meta)
 		channelId2Models[i] = adaptor.GetModelList()
 	}
+	channelId2Models[constant.ChannelTypeChatCore] = common.WithSkinnedModelNames(channelId2Models[constant.ChannelTypeChatCore])
 	openAIModels = lo.UniqBy(openAIModels, func(m dto.OpenAIModels) string {
 		return m.Id
 	})
@@ -172,18 +214,7 @@ func ListModels(c *gin.Context, modelType int) {
 			if !shouldExposeModelToRequester(c, allowModel, acceptUnsetRatioModel) {
 				continue
 			}
-			if oaiModel, ok := openAIModelsMap[allowModel]; ok {
-				oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(allowModel)
-				userOpenAiModels = append(userOpenAiModels, oaiModel)
-			} else {
-				userOpenAiModels = append(userOpenAiModels, dto.OpenAIModels{
-					Id:                     allowModel,
-					Object:                 "model",
-					Created:                1626777600,
-					OwnedBy:                "custom",
-					SupportedEndpointTypes: model.GetModelSupportEndpointTypes(allowModel),
-				})
-			}
+			userOpenAiModels = append(userOpenAiModels, buildExposedOpenAIModel(allowModel))
 		}
 	} else {
 		userId := c.GetInt("id")
@@ -213,24 +244,14 @@ func ListModels(c *gin.Context, modelType int) {
 		} else {
 			models = model.GetGroupEnabledModels(group)
 		}
-		for _, modelName := range models {
+		for _, modelName := range common.ExposeSkinnedModelNames(models) {
 			if !shouldExposeModelToRequester(c, modelName, acceptUnsetRatioModel) {
 				continue
 			}
-			if oaiModel, ok := openAIModelsMap[modelName]; ok {
-				oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
-				userOpenAiModels = append(userOpenAiModels, oaiModel)
-			} else {
-				userOpenAiModels = append(userOpenAiModels, dto.OpenAIModels{
-					Id:                     modelName,
-					Object:                 "model",
-					Created:                1626777600,
-					OwnedBy:                "custom",
-					SupportedEndpointTypes: model.GetModelSupportEndpointTypes(modelName),
-				})
-			}
+			userOpenAiModels = append(userOpenAiModels, buildExposedOpenAIModel(modelName))
 		}
 	}
+	userOpenAiModels = lo.UniqBy(userOpenAiModels, func(item dto.OpenAIModels) string { return item.Id })
 
 	switch modelType {
 	case constant.ChannelTypeAnthropic:
@@ -278,9 +299,13 @@ func ChannelListModels(c *gin.Context) {
 }
 
 func DashboardListModels(c *gin.Context) {
+	data := make(map[int][]string, len(channelId2Models))
+	for key, models := range channelId2Models {
+		data[key] = append([]string{}, models...)
+	}
 	c.JSON(200, gin.H{
 		"success": true,
-		"data":    channelId2Models,
+		"data":    data,
 	})
 }
 
@@ -293,6 +318,9 @@ func EnabledListModels(c *gin.Context) {
 
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
+	if aliased := common.PublicSkinnedModelName(modelId); aliased != modelId {
+		modelId = aliased
+	}
 	if aiModel, ok := openAIModelsMap[modelId]; ok {
 		switch modelType {
 		case constant.ChannelTypeAnthropic:

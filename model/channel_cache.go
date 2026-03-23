@@ -107,6 +107,12 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = group2model2channels[group][normalizedModel]
 	}
+	if len(channels) == 0 {
+		aliasedModel := common.ResolveSkinnedModelAlias(model)
+		if aliasedModel != "" && aliasedModel != model {
+			channels = group2model2channels[group][aliasedModel]
+		}
+	}
 
 	if len(channels) == 0 {
 		return nil, nil
