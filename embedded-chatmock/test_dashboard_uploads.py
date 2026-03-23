@@ -11,7 +11,7 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.app import create_app
-from chatmock.utils import _clear_invalid_auth_candidate, _mark_invalid_auth_candidate
+from chatmock.utils import _clear_invalid_auth_candidate, _is_invalid_auth_candidate, _mark_invalid_auth_candidate
 
 
 class DashboardUploadTests(unittest.TestCase):
@@ -76,7 +76,7 @@ class DashboardUploadTests(unittest.TestCase):
             else:
                 os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = original_settings_path
 
-    def test_upload_rejects_known_invalid_account_id(self):
+    def test_upload_known_invalid_account_id_clears_blacklist_and_accepts_new_auth(self):
         original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
         original_data_dir = os.environ.get("CHATMOCK_DATA_DIR")
         original_settings_path = os.environ.get("CHATMOCK_DASHBOARD_SETTINGS_PATH")
@@ -89,6 +89,7 @@ class DashboardUploadTests(unittest.TestCase):
                 os.environ.pop("CHATGPT_LOCAL_AUTH_FILES", None)
 
                 _mark_invalid_auth_candidate(label="default", account_id="bad-account")
+                self.assertTrue(_is_invalid_auth_candidate(account_id="bad-account"))
 
                 payload = io.BytesIO(
                     json.dumps({"tokens": {"account_id": "bad-account", "access_token": "bad-token"}}).encode("utf-8")
@@ -99,10 +100,10 @@ class DashboardUploadTests(unittest.TestCase):
                     content_type="multipart/form-data",
                 )
 
-                self.assertEqual(resp.status_code, 400)
+                self.assertEqual(resp.status_code, 200)
                 body = resp.get_json()
-                self.assertIn("all files failed", body.get("error", ""))
-                self.assertTrue(any("marked invalid" in detail for detail in body.get("details", [])))
+                self.assertEqual(body.get("uploaded"), 1)
+                self.assertFalse(_is_invalid_auth_candidate(account_id="bad-account"))
         finally:
             if original_auth_files is None:
                 os.environ.pop("CHATGPT_LOCAL_AUTH_FILES", None)

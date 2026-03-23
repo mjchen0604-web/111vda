@@ -12,6 +12,7 @@ from flask import Blueprint, current_app, jsonify, make_response, request, send_
 
 from .reasoning import normalize_reasoning_compat
 from .utils import (
+    _clear_invalid_auth_candidate,
     _invalid_auth_account_ids,
     _known_auth_file_paths,
     get_chatgpt_auth_records,
@@ -732,7 +733,8 @@ def dashboard_action_upload_auths():
             previous_path = ""
 
             if account_id and account_id in invalid_account_ids:
-                raise ValueError(f"account_id {account_id} is marked invalid and cannot be re-uploaded")
+                _clear_invalid_auth_candidate(account_id=account_id)
+                invalid_account_ids.discard(account_id)
 
             if not replace and fingerprint in fingerprint_to_path:
                 target = Path(fingerprint_to_path[fingerprint])
