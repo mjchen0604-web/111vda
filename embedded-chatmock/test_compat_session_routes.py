@@ -214,7 +214,7 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json().get("model"), "gpt-5.4-fast")
 
-    def test_anthropic_messages_maps_common_fields_to_responses_payload(self):
+    def test_anthropic_messages_uses_minimal_extra_payload_for_current_backend(self):
         captured = {}
 
         def stub(model, input_items, **kwargs):
@@ -248,17 +248,7 @@ class CompatSessionRouteTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn("max_output_tokens", captured["extra_payload"])
-        self.assertEqual(captured["extra_payload"].get("temperature"), 0.2)
-        self.assertEqual(captured["extra_payload"].get("top_p"), 0.9)
-        self.assertEqual(captured["extra_payload"].get("top_k"), 10)
-        self.assertEqual(captured["extra_payload"].get("metadata"), {"source": "cc"})
-        self.assertEqual(captured["extra_payload"].get("mcp_servers"), [{"name": "demo"}])
-        self.assertEqual(captured["extra_payload"].get("context_management"), {"mode": "windowed"})
-        self.assertEqual(captured["extra_payload"].get("container"), {"id": "container_demo"})
-        self.assertEqual(captured["extra_payload"].get("output_config"), {"format": "json"})
-        self.assertEqual(captured["extra_payload"].get("output_format"), {"type": "json_schema"})
-        self.assertEqual(captured["extra_payload"].get("inference_geo"), "eu")
-        self.assertEqual(captured["extra_payload"].get("stop_sequences"), ["STOP"])
+        self.assertEqual(captured["extra_payload"], {})
 
     def test_anthropic_messages_ignores_undefined_sentinel_fields(self):
         captured = {}
@@ -503,12 +493,12 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_invalid")
         self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
 
-    def test_anthropic_nonstream_rejects_unsupported_temperature_without_retry(self):
+    def test_anthropic_nonstream_does_not_forward_temperature(self):
         calls = []
 
         def stub(model, input_items, **kwargs):
             calls.append({"extra_payload": dict(kwargs.get("extra_payload") or {})})
-            return DummyHTTPInvalidRequestUpstream("Unsupported parameter: temperature"), None
+            return DummyUpstream("resp_anthropic_temperature_filtered"), None
 
         original = routes_anthropic.start_upstream_request
         routes_anthropic.start_upstream_request = stub
@@ -525,10 +515,9 @@ class CompatSessionRouteTests(unittest.TestCase):
         finally:
             routes_anthropic.start_upstream_request = original
 
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["extra_payload"].get("temperature"), 1)
-        self.assertIn("Unsupported parameter: temperature", resp.get_json()["error"]["message"])
+        self.assertNotIn("temperature", calls[0]["extra_payload"])
 
     def test_chat_completions_nonstream_retries_without_previous_response_id_on_generic_invalid_request(self):
         calls = []
