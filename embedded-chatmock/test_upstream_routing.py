@@ -57,12 +57,16 @@ class UpstreamRoutingTests(unittest.TestCase):
         app = Flask(__name__)
         app.config["BASE_INSTRUCTIONS"] = "base-template"
         app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
+        app.config["CLAUDE_OPUS_INSTRUCTIONS"] = "claude-template"
         with app.app_context():
             self.assertEqual(_instructions_for_model("gpt-5.4"), "codex-template")
             self.assertEqual(_instructions_for_model("gpt-5.4-fast"), "codex-template")
             self.assertEqual(_anthropic_instructions_for_model("gpt-5.4-high"), "codex-template")
             self.assertEqual(_ollama_instructions_for_model("gpt-5.4-fast-xhigh"), "codex-template")
             self.assertEqual(_instructions_for_model("gpt-5-codex"), "codex-template")
+            self.assertEqual(_instructions_for_model("claude-opus-4-6"), "claude-template")
+            self.assertEqual(_anthropic_instructions_for_model("claude-sonnet-4-5"), "claude-template")
+            self.assertEqual(_ollama_instructions_for_model("claude-haiku-4-5"), "claude-template")
 
     def test_native_prompt_mode_can_produce_empty_template(self):
         app = Flask(__name__)

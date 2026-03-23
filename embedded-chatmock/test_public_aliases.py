@@ -23,6 +23,22 @@ class PublicAliasTests(unittest.TestCase):
         self.assertEqual(effort, "high")
         self.assertEqual(service_tier, "fast")
 
+    def test_claude_aliases_map_to_internal_gpt54_family(self):
+        base, effort, service_tier = split_model_alias("claude-opus-4-6")
+        self.assertEqual(base, "gpt-5.4")
+        self.assertEqual(effort, "xhigh")
+        self.assertEqual(service_tier, "fast")
+
+        base, effort, service_tier = split_model_alias("claude-sonnet-4-5")
+        self.assertEqual(base, "gpt-5.4")
+        self.assertEqual(effort, "high")
+        self.assertEqual(service_tier, "fast")
+
+        base, effort, service_tier = split_model_alias("claude-haiku-4-5")
+        self.assertEqual(base, "gpt-5.4")
+        self.assertEqual(effort, "high")
+        self.assertIsNone(service_tier)
+
     def test_public_service_tier_maps_fast_to_priority(self):
         self.assertEqual(public_service_tier_name("fast"), "priority")
         self.assertEqual(public_service_tier_name("priority"), "priority")
@@ -42,11 +58,15 @@ class PublicAliasTests(unittest.TestCase):
     def test_public_model_name_rewrites_fast_suffix(self):
         self.assertEqual(
             public_model_name("gpt-5.4-fast-xhigh"),
-            "gpt-5.4-fast-xhigh",
+            "claude-opus-4-6",
         )
         self.assertEqual(
-            public_model_name("gpt-5.4-fast"),
-            "gpt-5.4-fast",
+            public_model_name("gpt-5.4-fast-high"),
+            "claude-sonnet-4-5",
+        )
+        self.assertEqual(
+            public_model_name("gpt-5.4-high"),
+            "claude-haiku-4-5",
         )
 
 

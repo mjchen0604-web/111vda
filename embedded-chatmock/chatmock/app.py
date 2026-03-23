@@ -6,6 +6,7 @@ from flask import Flask, jsonify
 
 from .config import (
     BASE_INSTRUCTIONS,
+    CLAUDE_OPUS_INSTRUCTIONS,
     GPT5_CODEX_INSTRUCTIONS,
 )
 from .http import build_cors_headers
@@ -53,6 +54,7 @@ def create_app(
         DEBUG_MODEL=debug_model,
         BASE_INSTRUCTIONS=BASE_INSTRUCTIONS,
         GPT5_CODEX_INSTRUCTIONS=GPT5_CODEX_INSTRUCTIONS,
+        CLAUDE_OPUS_INSTRUCTIONS=CLAUDE_OPUS_INSTRUCTIONS,
         EXPOSE_REASONING_MODELS=bool(expose_reasoning_models),
         DEFAULT_WEB_SEARCH=bool(default_web_search),
         SERVICE_TIER=normalized_service_tier,

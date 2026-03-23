@@ -6,6 +6,14 @@ from typing import Any, Dict, Set
 DEFAULT_REASONING_EFFORTS: Set[str] = {"minimal", "low", "medium", "high", "xhigh"}
 MODEL_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 VALID_REASONING_COMPAT = {"legacy", "o3", "current"}
+PUBLIC_MODEL_ALIAS_TO_INTERNAL = {
+    "claude-opus-4-6": "gpt-5.4-fast-xhigh",
+    "claude-sonnet-4-5": "gpt-5.4-fast-high",
+    "claude-haiku-4-5": "gpt-5.4-high",
+}
+INTERNAL_MODEL_TO_PUBLIC_ALIAS = {
+    value: key for key, value in PUBLIC_MODEL_ALIAS_TO_INTERNAL.items()
+}
 
 
 def normalize_reasoning_compat(value: Any) -> str:
@@ -26,6 +34,8 @@ def split_model_alias(model: str | None) -> tuple[str, str | None, str | None]:
     base = model.strip().lower()
     if not base:
         return "", None, None
+    if base in PUBLIC_MODEL_ALIAS_TO_INTERNAL:
+        return split_model_alias(PUBLIC_MODEL_ALIAS_TO_INTERNAL[base])
 
     effort: str | None = None
     service_tier: str | None = None
@@ -188,4 +198,6 @@ def presented_service_tier_name(
 def public_model_name(model: str | None) -> str | None:
     if not isinstance(model, str) or not model.strip():
         return model
-    return model.strip()
+    normalized = model.strip().lower()
+    alias = INTERNAL_MODEL_TO_PUBLIC_ALIAS.get(normalized)
+    return alias if isinstance(alias, str) and alias else model.strip()

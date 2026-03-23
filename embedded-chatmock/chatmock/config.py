@@ -44,8 +44,14 @@ def read_gpt5_codex_instructions(fallback: str) -> str:
     return content if isinstance(content, str) and content.strip() else fallback
 
 
+def read_claude_opus_instructions(fallback: str) -> str:
+    content = _read_prompt_text("prompt_claude_opus_46.md")
+    return content if isinstance(content, str) and content.strip() else fallback
+
+
 BASE_INSTRUCTIONS = read_base_instructions()
 GPT5_CODEX_INSTRUCTIONS = read_gpt5_codex_instructions(BASE_INSTRUCTIONS)
+CLAUDE_OPUS_INSTRUCTIONS = read_claude_opus_instructions(BASE_INSTRUCTIONS)
 
 
 def should_use_gpt5_codex_instructions(model: str | None) -> bool:
@@ -53,3 +59,10 @@ def should_use_gpt5_codex_instructions(model: str | None) -> bool:
     if not normalized:
         return False
     return "codex" in normalized or normalized.startswith("gpt-5.4") or normalized.startswith("gpt5.4")
+
+
+def should_use_claude_opus_instructions(model: str | None) -> bool:
+    normalized = str(model or "").strip().lower()
+    if not normalized:
+        return False
+    return normalized.startswith("claude-opus-4-6") or normalized.startswith("claude-sonnet-4-5") or normalized.startswith("claude-haiku-4-5")
