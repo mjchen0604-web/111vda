@@ -175,6 +175,18 @@ class UpstreamRoutingTests(unittest.TestCase):
             )
         self.assertIn("Try again at", message)
 
+    def test_minimized_invalid_request_keeps_raw_message(self):
+        app = Flask(__name__)
+        app.config["CLIENT_METADATA_MINIMIZATION"] = True
+        with app.app_context():
+            message = normalized_error_message(
+                {
+                    "raw_status": 400,
+                    "raw_message": "Unsupported parameter: tools",
+                }
+            )
+        self.assertEqual(message, "Unsupported parameter: tools")
+
     def test_minimize_responses_payload_drops_unused_defaults(self):
         payload = {
             "model": "gpt-5.4",

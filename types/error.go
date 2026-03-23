@@ -216,9 +216,18 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 	switch e.errorType {
 	case ErrorTypeOpenAIError:
 		if openAIError, ok := e.RelayError.(OpenAIError); ok {
+			claudeType := strings.TrimSpace(openAIError.Type)
+			if claudeType == "" || claudeType == "upstream_error" {
+				if openAIError.Code != nil {
+					claudeType = strings.TrimSpace(fmt.Sprintf("%v", openAIError.Code))
+				}
+				if claudeType == "" || claudeType == "<nil>" || claudeType == "upstream_error" {
+					claudeType = normalizeOpenAIErrorType(e.StatusCode, "")
+				}
+			}
 			result = ClaudeError{
 				Message: e.Error(),
-				Type:    fmt.Sprintf("%v", openAIError.Code),
+				Type:    claudeType,
 			}
 		}
 	case ErrorTypeClaudeError:

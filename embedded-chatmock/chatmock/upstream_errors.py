@@ -569,10 +569,14 @@ def normalized_error_message(info: Mapping[str, Any]) -> str:
         if category == "permission_denied":
             return "Permission denied"
         if category == "invalid_request":
+            if raw_message:
+                return raw_message
             return "Invalid request"
         if category == "not_found":
             return "Resource not found"
         if category == "request_too_large":
+            if raw_message:
+                return raw_message
             return "Request body too large"
         return "The server had an error while processing your request."
     if raw_message:
