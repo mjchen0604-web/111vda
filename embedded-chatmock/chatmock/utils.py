@@ -835,6 +835,25 @@ def _persist_dashboard_quarantined_auth_files(paths: List[str]) -> bool:
     return _write_json_file(path, payload)
 
 
+def _clear_quarantined_auth_paths(paths: List[str]) -> bool:
+    normalized_targets = {
+        _canonical_auth_path(item)
+        for item in paths
+        if isinstance(item, str) and item.strip()
+    }
+    if not normalized_targets:
+        return False
+    existing = _quarantined_auth_files()
+    updated = [
+        item
+        for item in existing
+        if _canonical_auth_path(item) not in normalized_targets
+    ]
+    if len(updated) == len(existing):
+        return False
+    return _persist_dashboard_quarantined_auth_files(updated)
+
+
 def _persist_dashboard_default_auth_fields(
     access_token: str = "",
     account_id: str = "",

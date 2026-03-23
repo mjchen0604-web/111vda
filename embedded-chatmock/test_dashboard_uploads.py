@@ -76,6 +76,61 @@ class DashboardUploadTests(unittest.TestCase):
             else:
                 os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = original_settings_path
 
+    def test_upload_same_path_clears_quarantine(self):
+        original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
+        original_data_dir = os.environ.get("CHATMOCK_DATA_DIR")
+        original_settings_path = os.environ.get("CHATMOCK_DASHBOARD_SETTINGS_PATH")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                accounts_root = Path(temp_dir) / "accounts"
+                settings_path = Path(temp_dir) / "dashboard-settings.json"
+                auth1 = accounts_root / "acc01" / "auth.json"
+                auth1.parent.mkdir(parents=True, exist_ok=True)
+                auth1.write_text(
+                    json.dumps({"tokens": {"account_id": "same-account", "access_token": "old-token"}}),
+                    encoding="utf-8",
+                )
+                settings_path.write_text(
+                    json.dumps(
+                        {
+                            "authFiles": [str(auth1)],
+                            "quarantinedAuthFiles": [str(auth1)],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                os.environ["CHATMOCK_DATA_DIR"] = temp_dir
+                os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = str(settings_path)
+                os.environ["CHATGPT_LOCAL_AUTH_FILES"] = str(auth1)
+                os.environ["CHATGPT_LOCAL_AUTH_FILES_CONFIGURED"] = "1"
+
+                payload = io.BytesIO(
+                    json.dumps({"tokens": {"account_id": "same-account", "access_token": "new-token"}}).encode("utf-8")
+                )
+                resp = self.client.post(
+                    "/api/actions/upload_auths",
+                    data={"files": (payload, "auth.json")},
+                    content_type="multipart/form-data",
+                )
+
+                self.assertEqual(resp.status_code, 200)
+                saved_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved_settings.get("quarantinedAuthFiles"), [])
+        finally:
+            if original_auth_files is None:
+                os.environ.pop("CHATGPT_LOCAL_AUTH_FILES", None)
+            else:
+                os.environ["CHATGPT_LOCAL_AUTH_FILES"] = original_auth_files
+            if original_data_dir is None:
+                os.environ.pop("CHATMOCK_DATA_DIR", None)
+            else:
+                os.environ["CHATMOCK_DATA_DIR"] = original_data_dir
+            if original_settings_path is None:
+                os.environ.pop("CHATMOCK_DASHBOARD_SETTINGS_PATH", None)
+            else:
+                os.environ["CHATMOCK_DASHBOARD_SETTINGS_PATH"] = original_settings_path
+
     def test_upload_known_invalid_account_id_clears_blacklist_and_accepts_new_auth(self):
         original_auth_files = os.environ.get("CHATGPT_LOCAL_AUTH_FILES")
         original_data_dir = os.environ.get("CHATMOCK_DATA_DIR")

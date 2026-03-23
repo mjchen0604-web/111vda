@@ -13,6 +13,7 @@ from flask import Blueprint, current_app, jsonify, make_response, request, send_
 from .reasoning import normalize_reasoning_compat
 from .utils import (
     _clear_invalid_auth_candidate,
+    _clear_quarantined_auth_paths,
     _invalid_auth_account_ids,
     _known_auth_file_paths,
     get_chatgpt_auth_records,
@@ -753,6 +754,7 @@ def dashboard_action_upload_auths():
                     account_id_to_path[account_id] = str(target)
 
             _write_auth_payload(target, payload)
+            _clear_quarantined_auth_paths([str(target)])
             written.append(str(target))
             upload_results.append(
                 {
