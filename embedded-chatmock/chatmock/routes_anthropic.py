@@ -166,6 +166,21 @@ def _has_tail_assistant_prefill(messages: Any) -> bool:
 
 def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     extra: Dict[str, Any] = {}
+    output_format = payload.get("output_format")
+    if isinstance(output_format, dict) and output_format:
+        extra["text"] = {"format": output_format}
+        return extra
+
+    output_config = payload.get("output_config")
+    if isinstance(output_config, dict):
+        raw_format = output_config.get("format")
+        if isinstance(raw_format, dict) and raw_format:
+            extra["text"] = {"format": raw_format}
+            return extra
+        if isinstance(raw_format, str):
+            normalized = raw_format.strip().lower()
+            if normalized in ("json", "json_object"):
+                extra["text"] = {"format": {"type": "json_object"}}
     return extra
 
 

@@ -214,7 +214,7 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json().get("model"), "gpt-5.4-fast")
 
-    def test_anthropic_messages_uses_minimal_extra_payload_for_current_backend(self):
+    def test_anthropic_messages_only_maps_output_format_to_text_format(self):
         captured = {}
 
         def stub(model, input_items, **kwargs):
@@ -248,7 +248,38 @@ class CompatSessionRouteTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn("max_output_tokens", captured["extra_payload"])
-        self.assertEqual(captured["extra_payload"], {})
+        self.assertEqual(
+            captured["extra_payload"],
+            {"text": {"format": {"type": "json_schema"}}},
+        )
+
+    def test_anthropic_messages_maps_output_config_json_to_text_format(self):
+        captured = {}
+
+        def stub(model, input_items, **kwargs):
+            captured["extra_payload"] = dict(kwargs.get("extra_payload") or {})
+            return DummyUpstream("resp_anthropic_output_config"), None
+
+        original = routes_anthropic.start_upstream_request
+        routes_anthropic.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/messages",
+                json={
+                    "model": "gpt-5.4",
+                    "max_tokens": 77,
+                    "output_config": {"format": "json"},
+                    "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                },
+            )
+        finally:
+            routes_anthropic.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            captured["extra_payload"],
+            {"text": {"format": {"type": "json_object"}}},
+        )
 
     def test_anthropic_messages_ignores_undefined_sentinel_fields(self):
         captured = {}
