@@ -168,8 +168,16 @@ def _has_tail_assistant_prefill(messages: Any) -> bool:
 def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     extra: Dict[str, Any] = {}
     passthrough_keys = (
+        "metadata",
+        "mcp_servers",
+        "context_management",
+        "container",
+        "output_config",
+        "output_format",
+        "inference_geo",
         "temperature",
         "top_p",
+        "top_k",
     )
     for key in passthrough_keys:
         if key not in payload:
@@ -180,6 +188,14 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if _is_undefined_text_value(value):
             continue
         extra[key] = value
+
+    stop_sequences = payload.get("stop_sequences")
+    if _is_undefined_text_value(stop_sequences):
+        stop_sequences = None
+    if isinstance(stop_sequences, list):
+        filtered = [item for item in stop_sequences if isinstance(item, str) and item]
+        if filtered:
+            extra["stop_sequences"] = filtered
 
     return extra
 
