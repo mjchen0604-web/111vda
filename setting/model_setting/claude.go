@@ -26,7 +26,13 @@ var defaultClaudeSettings = ClaudeSettings{
 	HeadersSettings:        map[string]map[string][]string{},
 	ThinkingAdapterEnabled: true,
 	DefaultMaxTokens: map[string]int{
-		"default": 8192,
+		"default":            8192,
+		"claude-opus-4-6":    128000,
+		"claude-opus-4-5":    128000,
+		"claude-sonnet-4-6":  128000,
+		"claude-sonnet-4-5":  128000,
+		"claude-haiku-4-5":   128000,
+		"claude-haiku-3-5":   128000,
 	},
 	ThinkingAdapterBudgetTokensPercentage: 0.8,
 }

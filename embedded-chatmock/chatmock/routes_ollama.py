@@ -109,9 +109,9 @@ def _resolve_prompt_mode(payload: Dict[str, Any]) -> str:
     return "default"
 
 
-def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
+def _resolve_bridge_instructions(requested_model: str | None, model: str, payload: Dict[str, Any]) -> str | None:
     if _resolve_prompt_mode(payload) != "native":
-        return _instructions_for_model(model)
+        return _instructions_for_model(requested_model or model)
     system_prompt = payload.get("system_prompt")
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt.strip()
@@ -362,7 +362,7 @@ def ollama_chat() -> Response:
 
     input_items = convert_chat_messages_to_responses_input(messages)
     normalized_model = normalize_model_name(model)
-    compaction_instructions = _resolve_bridge_instructions(normalized_model, payload)
+    compaction_instructions = _resolve_bridge_instructions(model, normalized_model, payload)
     input_items, compaction_instructions, _ = maybe_compact_input_items(
         payload,
         input_items,

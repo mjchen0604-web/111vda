@@ -195,9 +195,9 @@ def _resolve_stream_flag(payload: Dict[str, Any], default: bool = True) -> bool:
     return bool(value)
 
 
-def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
+def _resolve_bridge_instructions(requested_model: str | None, model: str, payload: Dict[str, Any]) -> str | None:
     if _resolve_prompt_mode(payload) != "native":
-        return _instructions_for_model(model)
+        return _instructions_for_model(requested_model or model)
     system_prompt = payload.get("system_prompt")
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt.strip()
@@ -473,7 +473,7 @@ def _resolve_responses_instructions(model: str, payload: Dict[str, Any]) -> str 
     instructions = payload.get("instructions")
     if isinstance(instructions, str):
         return instructions
-    return _resolve_bridge_instructions(model, payload)
+    return _resolve_bridge_instructions(payload.get("model"), model, payload)
 
 
 def _build_responses_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1412,7 +1412,7 @@ def chat_completions() -> Response:
         reasoning_overrides,
         allowed_efforts=allowed_efforts_for_model(model),
     )
-    bridge_instructions = _resolve_bridge_instructions(model, payload)
+    bridge_instructions = _resolve_bridge_instructions(requested_model, model, payload)
     thread_session = _resolve_thread_session(payload, input_items)
     (
         input_items,
@@ -1870,7 +1870,7 @@ def completions() -> Response:
         reasoning_overrides,
         allowed_efforts=allowed_efforts_for_model(model),
     )
-    bridge_instructions = _resolve_bridge_instructions(model, payload)
+    bridge_instructions = _resolve_bridge_instructions(requested_model, model, payload)
     thread_session = _resolve_thread_session(payload, input_items)
     (
         input_items,

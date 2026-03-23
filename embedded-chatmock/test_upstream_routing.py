@@ -75,9 +75,11 @@ class UpstreamRoutingTests(unittest.TestCase):
         app = Flask(__name__)
         app.config["BASE_INSTRUCTIONS"] = "base-template"
         app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
+        app.config["CLAUDE_OPUS_INSTRUCTIONS"] = "claude-template"
         with app.app_context():
-            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", {}), "codex-template")
-            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", {"prompt_mode": "native"}), "")
+            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", "gpt-5.4", {}), "codex-template")
+            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", "gpt-5.4", {"prompt_mode": "native"}), "")
+            self.assertEqual(_resolve_bridge_instructions("claude-sonnet-4-6", "gpt-5.4", {}), "claude-template")
 
     def test_dashboard_settings_force_web_search_off(self):
         current = {

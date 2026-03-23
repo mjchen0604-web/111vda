@@ -184,9 +184,9 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return extra
 
 
-def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
+def _resolve_bridge_instructions(requested_model: str | None, model: str, payload: Dict[str, Any]) -> str | None:
     if _resolve_prompt_mode(payload) != "native":
-        return _instructions_for_model(model)
+        return _instructions_for_model(requested_model or model)
     system_prompt = payload.get("system_prompt")
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt.strip()
@@ -964,7 +964,7 @@ def messages() -> Response:
         return _error_response("messages must include at least one content block", 400, "invalid_request_error")
 
     system_text = _system_to_text(payload.get("system")).strip()
-    instructions = _resolve_bridge_instructions(model, payload) or ""
+    instructions = _resolve_bridge_instructions(requested_model, model, payload) or ""
     if system_text:
         instructions = (instructions + "\n\n" + system_text).strip() if instructions else system_text
 
