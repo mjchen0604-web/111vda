@@ -13,25 +13,35 @@ func exposePricingModels(pricing []model.Pricing) []model.Pricing {
 	if len(pricing) == 0 {
 		return pricing
 	}
-	rawSet := make(map[string]struct{}, len(pricing))
+	internalAliasRows := make(map[string]model.Pricing)
 	for _, item := range pricing {
-		rawSet[item.ModelName] = struct{}{}
+		if alias, ok := common.FindModelSkinAliasByInternal(item.ModelName); ok {
+			cloned := item
+			cloned.ModelName = alias.PublicName
+			if cloned.Icon == "" {
+				cloned.Icon = alias.Icon
+			}
+			internalAliasRows[alias.PublicName] = cloned
+		}
 	}
 	result := make([]model.Pricing, 0, len(pricing))
 	for _, item := range pricing {
-		alias, ok := common.FindModelSkinAliasByInternal(item.ModelName)
-		if !ok {
+		if alias, ok := common.FindModelSkinAliasByPublic(item.ModelName); ok {
+			if _, exists := internalAliasRows[alias.PublicName]; exists {
+				continue
+			}
+			if item.Icon == "" {
+				item.Icon = alias.Icon
+			}
 			result = append(result, item)
 			continue
 		}
-		if _, exists := rawSet[alias.PublicName]; exists {
-			continue
-		}
-		item.ModelName = alias.PublicName
-		if item.Icon == "" {
-			item.Icon = alias.Icon
-		}
 		result = append(result, item)
+	}
+	for _, alias := range common.PublicModelAliases() {
+		if replacement, exists := internalAliasRows[alias.PublicName]; exists {
+			result = append(result, replacement)
+		}
 	}
 	return result
 }
