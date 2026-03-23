@@ -119,6 +119,13 @@ def _resolve_stream_flag(payload: Dict[str, Any], default: bool = True) -> bool:
     return bool(value)
 
 
+def _is_undefined_text_value(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower()
+    return normalized in ("", "undefined", "[undefined]")
+
+
 def _set_anthropic_request_id_headers(response: Response) -> Response:
     request_id = current_request_id()
     if request_id:
@@ -173,6 +180,8 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         value = payload.get(key)
         if value is None:
             continue
+        if _is_undefined_text_value(value):
+            continue
         extra[key] = value
 
     max_tokens = payload.get("max_tokens")
@@ -180,6 +189,8 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         extra["max_output_tokens"] = max_tokens
 
     stop_sequences = payload.get("stop_sequences")
+    if _is_undefined_text_value(stop_sequences):
+        stop_sequences = None
     if isinstance(stop_sequences, list):
         filtered = [item for item in stop_sequences if isinstance(item, str) and item]
         if filtered:
@@ -241,6 +252,8 @@ def _decode_json_body(raw: str) -> Dict[str, Any] | None:
 
 
 def _system_to_text(system_payload: Any) -> str:
+    if _is_undefined_text_value(system_payload):
+        return ""
     if isinstance(system_payload, str):
         return system_payload
     if not isinstance(system_payload, list):
@@ -466,6 +479,8 @@ def _convert_anthropic_messages_to_input(messages: Any) -> tuple[List[Dict[str, 
 
 
 def _convert_anthropic_tools(tools_payload: Any) -> tuple[List[Dict[str, Any]] | None, str | None]:
+    if _is_undefined_text_value(tools_payload):
+        return [], None
     if tools_payload is None:
         return [], None
     if not isinstance(tools_payload, list):
@@ -495,6 +510,8 @@ def _convert_anthropic_tools(tools_payload: Any) -> tuple[List[Dict[str, Any]] |
 
 
 def _convert_anthropic_tool_choice(choice_payload: Any) -> tuple[Any, bool, str | None]:
+    if _is_undefined_text_value(choice_payload):
+        return "auto", False, None
     if choice_payload is None:
         return "auto", False, None
 

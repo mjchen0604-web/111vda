@@ -260,6 +260,46 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(captured["extra_payload"].get("inference_geo"), "eu")
         self.assertEqual(captured["extra_payload"].get("stop_sequences"), ["STOP"])
 
+    def test_anthropic_messages_ignores_undefined_sentinel_fields(self):
+        captured = {}
+
+        def stub(model, input_items, **kwargs):
+            captured["extra_payload"] = dict(kwargs.get("extra_payload") or {})
+            captured["tools"] = list(kwargs.get("tools") or [])
+            captured["tool_choice"] = kwargs.get("tool_choice")
+            return DummyUpstream("resp_anthropic_undefined"), None
+
+        original = routes_anthropic.start_upstream_request
+        routes_anthropic.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/messages",
+                json={
+                    "model": "gpt-5.4-fast-low",
+                    "max_tokens": 4096,
+                    "temperature": "[undefined]",
+                    "top_k": "[undefined]",
+                    "top_p": "[undefined]",
+                    "stop_sequences": "[undefined]",
+                    "system": [{"type": "text", "text": "test", "cache_control": "[undefined]"}],
+                    "messages": [{"role": "user", "content": [{"type": "text", "text": "hi", "cache_control": "[undefined]"}]}],
+                    "tools": "[undefined]",
+                    "tool_choice": "[undefined]",
+                    "stream": True,
+                },
+            )
+        finally:
+            routes_anthropic.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(captured["extra_payload"].get("max_output_tokens"), 4096)
+        self.assertNotIn("temperature", captured["extra_payload"])
+        self.assertNotIn("top_k", captured["extra_payload"])
+        self.assertNotIn("top_p", captured["extra_payload"])
+        self.assertNotIn("stop_sequences", captured["extra_payload"])
+        self.assertEqual(captured["tools"], [])
+        self.assertEqual(captured["tool_choice"], "auto")
+
     def test_chat_completions_does_not_resume_previous_response_id_by_default(self):
         calls = []
 
