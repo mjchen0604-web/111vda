@@ -1022,6 +1022,20 @@ def _get_candidate_rate_limit_cooldown(label: str) -> float:
     return until_ts
 
 
+def _real_rate_limit_unlock_ts(label: str, info: Mapping[str, Any] | None = None) -> float | None:
+    now = time.time()
+    parsed_retry_after = extract_retry_after_unlock_ts(info or {})
+    candidate_cooldown = _get_candidate_rate_limit_cooldown(label)
+    candidates = [
+        ts
+        for ts in (parsed_retry_after, candidate_cooldown)
+        if isinstance(ts, (int, float)) and float(ts) > now
+    ]
+    if not candidates:
+        return None
+    return max(float(ts) for ts in candidates)
+
+
 def _candidate_codex_pressure_score(candidate: Dict[str, Any]) -> tuple[int, float]:
     if not isinstance(candidate, dict):
         return (1, 1000.0)
@@ -1707,20 +1721,8 @@ def mark_chatgpt_auth_result(
                 if category == "rate_limited"
                 else "temporary_failure"
             )
-        elif isinstance(status_code, int) and status_code in (401, 403):
-            base = 5
-            cooldown = min(max_retry_interval, base * (2 ** max(0, failures - 1)))
-            cooldown_until = now + float(cooldown)
-            state_status = "temporary_failure"
-        elif isinstance(status_code, int) and status_code == 429:
-            base = 2
-            cooldown = min(max_retry_interval, base * (2 ** max(0, failures - 1)))
-            cooldown_until = now + float(cooldown)
-            state_status = "temporary_failure"
         else:
-            base = 1
-            cooldown = min(max_retry_interval, base * (2 ** max(0, failures - 1)))
-            cooldown_until = now + float(cooldown)
+            cooldown_until = 0.0
             state_status = "temporary_failure"
         _set_auth_pool_state(
             label,
@@ -1744,13 +1746,12 @@ def handle_chatgpt_candidate_failure(candidate: Dict[str, Any], info: Dict[str, 
     raw_status = info.get("raw_status") if isinstance(info.get("raw_status"), int) else None
     raw_code = info.get("raw_code") if isinstance(info.get("raw_code"), str) else None
     raw_message = info.get("raw_message") if isinstance(info.get("raw_message"), str) else None
-    retry_at_until = extract_retry_after_unlock_ts(info)
+    retry_at_until = _real_rate_limit_unlock_ts(label, info)
     effective_classification = classification
     if retry_at_until is not None and effective_classification == "generic_failure":
         effective_classification = "rate_limited"
 
     if effective_classification in ("insufficient_balance", "rate_limited"):
-        cooldown_until = float(retry_at_until) if retry_at_until is not None else time.time() + float(5 * 60 * 60)
         mark_chatgpt_auth_result(
             label,
             success=False,
@@ -1758,7 +1759,6 @@ def handle_chatgpt_candidate_failure(candidate: Dict[str, Any], info: Dict[str, 
             account_id=account_id,
             error_message=raw_message,
             classification=effective_classification,
-            cooldown_seconds=None if retry_at_until is not None else 5 * 60 * 60,
             cooldown_until_ts=retry_at_until,
             raw_code=raw_code,
             raw_message=raw_message,

@@ -199,12 +199,24 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         self.assertIsNotNone(preferred)
         self.assertEqual(preferred["label"], "acc02/auth.json")
 
-    def test_rate_limited_candidate_cools_down_same_account_duplicates(self):
+    def test_rate_limited_candidate_without_unlock_time_does_not_cool_down_duplicates(self):
         candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}
         candidate2 = {"label": "acc02/auth.json", "account_id": "same-account"}
         info = {
             "raw_status": 429,
             "raw_message": "Rate limit exceeded",
+            "raw_code": "rate_limit_exceeded",
+        }
+        handle_chatgpt_candidate_failure(candidate1, info)
+        self.assertFalse(is_auth_candidate_blocked(candidate1))
+        self.assertFalse(is_auth_candidate_blocked(candidate2))
+
+    def test_rate_limited_candidate_with_explicit_unlock_time_cools_down_duplicates(self):
+        candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}
+        candidate2 = {"label": "acc02/auth.json", "account_id": "same-account"}
+        info = {
+            "raw_status": 429,
+            "raw_message": "The usage limit has been reached. Try again at Mar 29, 2026 9:00 AM",
             "raw_code": "rate_limit_exceeded",
         }
         handle_chatgpt_candidate_failure(candidate1, info)

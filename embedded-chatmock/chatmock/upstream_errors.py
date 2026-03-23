@@ -114,8 +114,25 @@ def _error_text_haystack(info: Mapping[str, Any]) -> str:
     return " ".join(part for part in text_parts if part).lower()
 
 
+def _error_text_raw(info: Mapping[str, Any]) -> str:
+    text_parts = [
+        _compact_string(info.get("raw_message")),
+        _compact_string(info.get("raw_code")),
+    ]
+    raw_body = info.get("raw_body")
+    if isinstance(raw_body, (dict, list)):
+        try:
+            text_parts.append(json.dumps(raw_body, ensure_ascii=False))
+        except Exception:
+            text_parts.append(_compact_string(raw_body))
+    else:
+        text_parts.append(_compact_string(raw_body))
+    return " ".join(part for part in text_parts if part)
+
+
 def extract_retry_after_unlock_ts(info: Mapping[str, Any]) -> float | None:
-    haystack = _error_text_haystack(info)
+    raw_message = _compact_string(info.get("raw_message"))
+    haystack = raw_message or _error_text_raw(info)
     match = re.search(r"try again at\s+([^.]+)", haystack, flags=re.IGNORECASE)
     if not match:
         return None
@@ -124,14 +141,19 @@ def extract_retry_after_unlock_ts(info: Mapping[str, Any]) -> float | None:
     raw_value = raw_value.strip().rstrip(".,;:!?)")
     cleaned = re.sub(r"(\d{1,2})(st|nd|rd|th)", r"\1", raw_value, flags=re.IGNORECASE)
     local_tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
-    for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p"):
-        try:
-            dt = datetime.datetime.strptime(cleaned, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=local_tz)
-            return dt.timestamp()
-        except Exception:
-            continue
+    candidates = [cleaned]
+    titled = cleaned.title()
+    if titled != cleaned:
+        candidates.append(titled)
+    for candidate in candidates:
+        for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p"):
+            try:
+                dt = datetime.datetime.strptime(candidate, fmt)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=local_tz)
+                return dt.timestamp()
+            except Exception:
+                continue
     return None
 
 
