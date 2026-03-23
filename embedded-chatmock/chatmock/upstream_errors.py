@@ -466,6 +466,49 @@ def should_retry_next_candidate(info: Mapping[str, Any]) -> bool:
     return classify_error(info) in ("insufficient_balance", "rate_limited", "account_invalid") or extract_retry_after_unlock_ts(info) is not None
 
 
+def anthropic_error_type(info: Mapping[str, Any]) -> str:
+    raw_status = info.get("raw_status")
+    status = int(raw_status) if isinstance(raw_status, int) else None
+    if status in (400, 422):
+        return "invalid_request_error"
+    if status == 401:
+        return "authentication_error"
+    if status == 402:
+        return "billing_error"
+    if status == 403:
+        return "permission_error"
+    if status == 404:
+        return "not_found_error"
+    if status == 413:
+        return "request_too_large"
+    if status == 429:
+        return "rate_limit_error"
+    if status == 529:
+        return "overloaded_error"
+    if status is not None and 500 <= status <= 599:
+        return "api_error"
+
+    category = classify_error(info)
+    if category == "account_invalid":
+        return "authentication_error"
+    if category == "permission_denied":
+        return "permission_error"
+    if category == "not_found":
+        return "not_found_error"
+    if category == "request_too_large":
+        return "request_too_large"
+    if category in ("insufficient_balance", "rate_limited"):
+        return "rate_limit_error"
+    return "api_error"
+
+
+def anthropic_error_payload(info: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "type": anthropic_error_type(info),
+        "message": normalized_error_message(info),
+    }
+
+
 def build_openai_error_response(info: Mapping[str, Any]) -> Response:
     payload = {"error": normalized_error_payload(info)}
     response = make_response(jsonify(payload), normalized_http_status(info))
@@ -476,7 +519,7 @@ def build_openai_error_response(info: Mapping[str, Any]) -> Response:
 
 def build_anthropic_error_response(info: Mapping[str, Any]) -> Response:
     request_id = current_request_id()
-    payload = {"type": "error", "error": normalized_error_payload(info)}
+    payload = {"type": "error", "error": anthropic_error_payload(info)}
     if request_id:
         payload["request_id"] = request_id
     response = make_response(jsonify(payload), normalized_http_status(info))

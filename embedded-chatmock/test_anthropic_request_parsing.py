@@ -69,7 +69,10 @@ class AnthropicRequestParsingTests(unittest.TestCase):
         self.assertEqual(body.get("type"), "error")
         self.assertEqual(body.get("request_id"), "req_prefill_123")
         self.assertEqual(resp.headers.get("request-id"), "req_prefill_123")
-        self.assertIn("Prefill is deprecated", body.get("error", {}).get("message", ""))
+        self.assertEqual(
+            body.get("error", {}).get("message", ""),
+            "Prefilling assistant messages is not supported for this model.",
+        )
 
 
 if __name__ == "__main__":

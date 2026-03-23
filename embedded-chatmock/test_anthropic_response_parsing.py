@@ -107,6 +107,7 @@ class AnthropicResponseParsingTests(unittest.TestCase):
         body = resp.get_json()
         self.assertEqual(body.get("request_id"), "req_err_456")
         self.assertEqual(body.get("type"), "error")
+        self.assertEqual(body.get("error"), {"type": "authentication_error", "message": "Account unavailable"})
 
 
 if __name__ == "__main__":

@@ -901,10 +901,7 @@ def messages() -> Response:
     requested_model = payload.get("model")
     model = normalize_model_name(requested_model, debug_model)
     if _is_prefill_deprecated_model(requested_model) and _has_tail_assistant_prefill(payload.get("messages")):
-        message = (
-            "Prefill is deprecated for Claude Opus 4.6, Claude Sonnet 4.6, "
-            "and Claude Sonnet 4.5. Use structured output or system instructions instead."
-        )
+        message = "Prefilling assistant messages is not supported for this model."
         _log_invalid_request_diagnostic(
             "INVALID REQUEST /v1/messages local_validation",
             payload=payload,
