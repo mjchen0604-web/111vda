@@ -12,7 +12,7 @@ from chatmock.routes_dashboard import _merge_payload_settings
 from chatmock.routes_anthropic import _instructions_for_model as _anthropic_instructions_for_model
 from chatmock.routes_ollama import _instructions_for_model as _ollama_instructions_for_model
 from chatmock.routes_openai import _instructions_for_model, _resolve_bridge_instructions, _resolve_web_search_mode
-from chatmock.upstream_errors import extract_retry_after_unlock_ts
+from chatmock.upstream_errors import extract_retry_after_unlock_ts, normalized_error_message
 from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
     _candidate_attempt_limit_for_current_request,
@@ -133,6 +133,30 @@ class UpstreamRoutingTests(unittest.TestCase):
         }
         unlock_ts = extract_retry_after_unlock_ts(info)
         self.assertIsNotNone(unlock_ts)
+
+    def test_extract_retry_after_unlock_ts_uses_retry_after_header(self):
+        info = {
+            "raw_status": 429,
+            "raw_message": "Rate limit exceeded",
+            "raw_headers": {
+                "retry-after": "3600",
+            },
+        }
+        unlock_ts = extract_retry_after_unlock_ts(info)
+        self.assertIsNotNone(unlock_ts)
+
+    def test_minimized_rate_limit_message_keeps_real_unlock_time(self):
+        app = Flask(__name__)
+        app.config["CLIENT_METADATA_MINIMIZATION"] = True
+        with app.app_context():
+            message = normalized_error_message(
+                {
+                    "raw_status": 429,
+                    "raw_message": "Rate limit exceeded",
+                    "raw_headers": {"retry-after": "3600"},
+                }
+            )
+        self.assertIn("Try again at", message)
 
     def test_minimize_responses_payload_drops_unused_defaults(self):
         payload = {

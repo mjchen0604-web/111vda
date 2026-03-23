@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import email.utils
 import json
 import os
 import re
@@ -130,31 +131,116 @@ def _error_text_raw(info: Mapping[str, Any]) -> str:
     return " ".join(part for part in text_parts if part)
 
 
+def _parse_retry_after_header(value: Any) -> float | None:
+    text = _compact_string(value)
+    if not text:
+        return None
+    try:
+        seconds = int(text)
+        if seconds > 0:
+            return datetime.datetime.now(datetime.timezone.utc).timestamp() + seconds
+    except Exception:
+        pass
+    try:
+        dt = email.utils.parsedate_to_datetime(text)
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            return dt.timestamp()
+    except Exception:
+        pass
+    return None
+
+
+def _parse_absolute_reset_header(value: Any) -> float | None:
+    text = _compact_string(value)
+    if not text:
+        return None
+    try:
+        parsed = float(text)
+        if parsed > 1000000000:
+            return parsed
+    except Exception:
+        pass
+    try:
+        candidate = text
+        if candidate.endswith("Z"):
+            candidate = candidate[:-1] + "+00:00"
+        dt = datetime.datetime.fromisoformat(candidate)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
+def _extract_retry_after_from_headers(info: Mapping[str, Any]) -> float | None:
+    headers = info.get("raw_headers")
+    if not isinstance(headers, Mapping):
+        return None
+
+    retry_after = _parse_retry_after_header(headers.get("retry-after"))
+    if retry_after is not None:
+        return retry_after
+
+    relative_candidates = []
+    for key in (
+        "x-codex-primary-reset-after-seconds",
+        "x-codex-secondary-reset-after-seconds",
+    ):
+        text = _compact_string(headers.get(key))
+        if not text:
+            continue
+        try:
+            seconds = int(text)
+            if seconds > 0:
+                relative_candidates.append(
+                    datetime.datetime.now(datetime.timezone.utc).timestamp() + seconds
+                )
+        except Exception:
+            continue
+    if relative_candidates:
+        return max(relative_candidates)
+
+    absolute_candidates = []
+    for key in (
+        "anthropic-fast-input-tokens-reset",
+        "anthropic-fast-output-tokens-reset",
+        "x-ratelimit-reset-requests",
+        "x-ratelimit-reset-tokens",
+    ):
+        parsed = _parse_absolute_reset_header(headers.get(key))
+        if parsed is not None:
+            absolute_candidates.append(parsed)
+    if absolute_candidates:
+        return min(absolute_candidates)
+    return None
+
+
 def extract_retry_after_unlock_ts(info: Mapping[str, Any]) -> float | None:
     raw_message = _compact_string(info.get("raw_message"))
     haystack = raw_message or _error_text_raw(info)
     match = re.search(r"try again at\s+([^.]+)", haystack, flags=re.IGNORECASE)
-    if not match:
-        return None
-    raw_value = match.group(1).strip()
-    raw_value = re.split(r"\s+or\s+", raw_value, maxsplit=1, flags=re.IGNORECASE)[0]
-    raw_value = raw_value.strip().rstrip(".,;:!?)")
-    cleaned = re.sub(r"(\d{1,2})(st|nd|rd|th)", r"\1", raw_value, flags=re.IGNORECASE)
-    local_tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
-    candidates = [cleaned]
-    titled = cleaned.title()
-    if titled != cleaned:
-        candidates.append(titled)
-    for candidate in candidates:
-        for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p"):
-            try:
-                dt = datetime.datetime.strptime(candidate, fmt)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=local_tz)
-                return dt.timestamp()
-            except Exception:
-                continue
-    return None
+    if match:
+        raw_value = match.group(1).strip()
+        raw_value = re.split(r"\s+or\s+", raw_value, maxsplit=1, flags=re.IGNORECASE)[0]
+        raw_value = raw_value.strip().rstrip(".,;:!?)")
+        cleaned = re.sub(r"(\d{1,2})(st|nd|rd|th)", r"\1", raw_value, flags=re.IGNORECASE)
+        local_tz = datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+        candidates = [cleaned]
+        titled = cleaned.title()
+        if titled != cleaned:
+            candidates.append(titled)
+        for candidate in candidates:
+            for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p"):
+                try:
+                    dt = datetime.datetime.strptime(candidate, fmt)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=local_tz)
+                    return dt.timestamp()
+                except Exception:
+                    continue
+    return _extract_retry_after_from_headers(info)
 
 
 def build_error_info(
@@ -165,6 +251,7 @@ def build_error_info(
     raw_code: str | None = None,
     raw_message: str | None = None,
     raw_body: Any = None,
+    raw_headers: Mapping[str, Any] | None = None,
     category_override: str | None = None,
 ) -> dict[str, Any]:
     return {
@@ -174,6 +261,11 @@ def build_error_info(
         "raw_code": _compact_string(raw_code) or None,
         "raw_message": _compact_string(raw_message) or None,
         "raw_body": _jsonable(raw_body),
+        "raw_headers": {
+            str(k).strip().lower(): _compact_string(v)
+            for k, v in dict(raw_headers or {}).items()
+            if _compact_string(k)
+        },
         "category_override": _compact_string(category_override) or None,
     }
 
@@ -188,6 +280,18 @@ def error_info_from_http_response(source: str, phase: str, response: Any) -> dic
     raw_body: Any = None
     raw_message: str | None = None
     raw_code: str | None = None
+    raw_headers: dict[str, str] = {}
+
+    try:
+        headers = getattr(response, "headers", None)
+        if headers is not None:
+            for key, value in headers.items():
+                key_text = _compact_string(key).lower()
+                if not key_text:
+                    continue
+                raw_headers[key_text] = _compact_string(value)
+    except Exception:
+        raw_headers = {}
 
     try:
         content = getattr(response, "content", None)
@@ -212,6 +316,7 @@ def error_info_from_http_response(source: str, phase: str, response: Any) -> dic
         raw_code=raw_code,
         raw_message=raw_message,
         raw_body=raw_body,
+        raw_headers=raw_headers,
     )
 
 
@@ -242,6 +347,7 @@ def error_info_from_event_response(source: str, phase: str, response_payload: An
         raw_code=raw_code,
         raw_message=raw_message,
         raw_body=raw_body,
+        raw_headers=error_block.get("raw_headers") if isinstance(error_block, Mapping) else None,
     )
 
 
@@ -271,6 +377,7 @@ def error_info_from_flask_response(source: str, phase: str, response: Response) 
                 raw_code=_compact_string(error_block.get("raw_code")) or None,
                 raw_message=_compact_string(error_block.get("raw_message")) or _compact_string(error_block.get("message")) or None,
                 raw_body=error_block.get("raw_body"),
+                raw_headers=error_block.get("raw_headers") if isinstance(error_block.get("raw_headers"), Mapping) else None,
                 category_override=_compact_string(error_block.get("code")) or None,
             )
         return build_error_info(
@@ -407,12 +514,23 @@ def normalized_error_code(info: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _format_unlock_time(ts: float) -> str:
+    dt = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 def normalized_error_message(info: Mapping[str, Any]) -> str:
     category = classify_error(info)
+    raw_message = _compact_string(info.get("raw_message"))
+    retry_at = extract_retry_after_unlock_ts(info)
     if _client_metadata_minimization_enabled():
         if category == "insufficient_balance":
             return "Insufficient balance or quota"
         if category == "rate_limited":
+            if raw_message and "try again at" in raw_message.lower():
+                return raw_message
+            if isinstance(retry_at, (int, float)) and retry_at > 0:
+                return f"Rate limit exceeded. Try again at {_format_unlock_time(float(retry_at))}."
             return "Rate limit exceeded"
         if category == "account_invalid":
             return "Account unavailable"
@@ -425,7 +543,6 @@ def normalized_error_message(info: Mapping[str, Any]) -> str:
         if category == "request_too_large":
             return "Request body too large"
         return "The server had an error while processing your request."
-    raw_message = _compact_string(info.get("raw_message"))
     if raw_message:
         lowered = raw_message.lower()
         if "deactivated_workspace" in lowered:
@@ -449,6 +566,8 @@ def normalized_error_message(info: Mapping[str, Any]) -> str:
     if category == "insufficient_balance":
         return "Insufficient balance or quota"
     if category == "rate_limited":
+        if isinstance(retry_at, (int, float)) and retry_at > 0:
+            return f"Rate limit exceeded. Try again at {_format_unlock_time(float(retry_at))}."
         return "Rate limit exceeded"
     if category == "account_invalid":
         return "Account unavailable"
