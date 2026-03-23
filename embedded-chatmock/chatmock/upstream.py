@@ -338,6 +338,20 @@ def _should_mutate_candidate_state() -> bool:
     return str(marker).strip().lower() not in ("1", "true", "yes", "on")
 
 
+def _request_retry_limit_for_current_request() -> int:
+    if _should_mutate_candidate_state():
+        return get_request_retry_limit()
+    return 0
+
+
+def _candidate_attempt_limit_for_current_request(total_candidates: int) -> int:
+    if total_candidates <= 0:
+        return 0
+    if _should_mutate_candidate_state():
+        return total_candidates
+    return min(total_candidates, 3)
+
+
 def _normalize_service_tier(service_tier: str | None) -> str | None:
     if not isinstance(service_tier, str) or not service_tier.strip():
         return None
@@ -459,7 +473,7 @@ def _start_chatgpt_backend_request(
         _log_json("OUTBOUND >> ChatGPT Responses API payload", responses_payload)
 
     retryable_statuses = get_retryable_statuses()
-    request_retry_limit = get_request_retry_limit()
+    request_retry_limit = _request_retry_limit_for_current_request()
     max_retry_interval = get_max_retry_interval_seconds()
     last_exception = None
     last_upstream = None
@@ -481,7 +495,8 @@ def _start_chatgpt_backend_request(
             preferred_label = str(thread_session.get("candidate_label") or "").strip()
             preferred_source_path = str(thread_session.get("candidate_url") or "").strip()
 
-        for idx in range(len(round_candidates)):
+        candidate_attempt_limit = _candidate_attempt_limit_for_current_request(len(round_candidates))
+        for idx in range(candidate_attempt_limit):
             candidate = claim_chatgpt_auth_candidate(
                 ensure_fresh=True,
                 excluded_labels=tried_labels,
