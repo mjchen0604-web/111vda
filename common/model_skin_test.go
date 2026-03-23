@@ -42,7 +42,10 @@ func TestResolveBillingModelName(t *testing.T) {
 	if got := ResolveBillingModelName("claude-opus-4-6", constant.ChannelTypeChatCore); got != "gpt-5.4-fast-xhigh" {
 		t.Fatalf("unexpected billing model: %s", got)
 	}
-	if got := ResolveBillingModelName("claude-opus-4-6", constant.ChannelTypeAnthropic); got != "claude-opus-4-6" {
-		t.Fatalf("unexpected non-chatcore billing model: %s", got)
+	if got := ResolveBillingModelName("claude-sonnet-4-6", 0); got != "gpt-5.4-fast-medium" {
+		t.Fatalf("unexpected skinned billing model before channel selection: %s", got)
+	}
+	if got := ResolveBillingModelName("gpt-5.4-fast-xhigh", constant.ChannelTypeAnthropic); got != "gpt-5.4-fast-xhigh" {
+		t.Fatalf("unexpected passthrough billing model: %s", got)
 	}
 }

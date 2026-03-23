@@ -111,6 +111,9 @@ func ExposeSkinnedModelNames(modelNames []string) []string {
 }
 
 func ResolveBillingModelName(modelName string, channelType int) string {
+	if IsPublicSkinnedModel(modelName) {
+		return ResolveSkinnedModelAlias(modelName)
+	}
 	if channelType != constant.ChannelTypeChatCore {
 		return modelName
 	}
