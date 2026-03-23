@@ -251,7 +251,7 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(captured["extra_payload"].get("temperature"), 0.2)
         self.assertEqual(captured["extra_payload"].get("top_p"), 0.9)
         self.assertEqual(captured["extra_payload"].get("top_k"), 10)
-        self.assertEqual(captured["extra_payload"].get("metadata"), {"source": "cc"})
+        self.assertNotIn("metadata", captured["extra_payload"])
         self.assertEqual(captured["extra_payload"].get("mcp_servers"), [{"name": "demo"}])
         self.assertEqual(captured["extra_payload"].get("context_management"), {"mode": "windowed"})
         self.assertEqual(captured["extra_payload"].get("container"), {"id": "container_demo"})

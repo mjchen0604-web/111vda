@@ -163,7 +163,6 @@ def _has_tail_assistant_prefill(messages: Any) -> bool:
 def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     extra: Dict[str, Any] = {}
     passthrough_keys = (
-        "metadata",
         "mcp_servers",
         "context_management",
         "container",
