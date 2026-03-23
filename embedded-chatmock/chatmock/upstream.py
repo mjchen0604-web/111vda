@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any, Dict, List
 
 import requests
@@ -352,6 +353,18 @@ def _candidate_attempt_limit_for_current_request(total_candidates: int) -> int:
     return min(total_candidates, 3)
 
 
+def _candidate_session_id_for_current_request(session_id: str | None) -> str | None:
+    if _should_mutate_candidate_state():
+        return session_id
+    return None
+
+
+def _prompt_cache_key_for_current_request(session_id: str) -> str:
+    if _should_mutate_candidate_state():
+        return session_id
+    return f"test-{uuid.uuid4()}"
+
+
 def _normalize_service_tier(service_tier: str | None) -> str | None:
     if not isinstance(service_tier, str) or not service_tier.strip():
         return None
@@ -435,6 +448,8 @@ def _start_chatgpt_backend_request(
         parallel_tool_calls=parallel_tool_calls,
         client_supplied=client_session_id or payload_prompt_cache_key or thread_session_key,
     )
+    candidate_session_id = _candidate_session_id_for_current_request(session_id)
+    prompt_cache_key = _prompt_cache_key_for_current_request(session_id)
 
     responses_payload = {
         "model": model,
@@ -445,7 +460,7 @@ def _start_chatgpt_backend_request(
         "parallel_tool_calls": bool(parallel_tool_calls),
         "store": False,
         "stream": True,
-        "prompt_cache_key": session_id,
+        "prompt_cache_key": prompt_cache_key,
     }
     for key, value in normalized_extra_payload.items():
         if value is None:
@@ -467,7 +482,7 @@ def _start_chatgpt_backend_request(
     if normalized_service_tier is not None:
         responses_payload["service_tier"] = normalized_service_tier
     if not isinstance(responses_payload.get("prompt_cache_key"), str) or not str(responses_payload.get("prompt_cache_key") or "").strip():
-        responses_payload["prompt_cache_key"] = session_id
+        responses_payload["prompt_cache_key"] = prompt_cache_key
     responses_payload = _minimize_responses_payload(responses_payload)
     if verbose:
         _log_json("OUTBOUND >> ChatGPT Responses API payload", responses_payload)
@@ -491,7 +506,7 @@ def _start_chatgpt_backend_request(
             break
         preferred_label = ""
         preferred_source_path = ""
-        if isinstance(thread_session, dict):
+        if _should_mutate_candidate_state() and isinstance(thread_session, dict):
             preferred_label = str(thread_session.get("candidate_label") or "").strip()
             preferred_source_path = str(thread_session.get("candidate_url") or "").strip()
 
@@ -500,7 +515,7 @@ def _start_chatgpt_backend_request(
             candidate = claim_chatgpt_auth_candidate(
                 ensure_fresh=True,
                 excluded_labels=tried_labels,
-                session_id=session_id,
+                session_id=candidate_session_id,
                 preferred_label=preferred_label,
                 preferred_source_path=preferred_source_path,
             )
@@ -523,13 +538,13 @@ def _start_chatgpt_backend_request(
                 "Accept": "text/event-stream",
                 "chatgpt-account-id": account_id,
                 "OpenAI-Beta": "responses=experimental",
-                "session_id": session_id,
+                "session_id": prompt_cache_key,
             }
 
             slot_id = None
             session_client = None
             try:
-                slot_id, session_client = acquire_chatgpt_connection_slot(candidate, session_id)
+                slot_id, session_client = acquire_chatgpt_connection_slot(candidate, prompt_cache_key)
                 request_callable = session_client.post if isinstance(session_client, requests.Session) else requests.post
                 upstream, responses_payload = _post_with_invalid_request_fallback(
                     request_callable,
@@ -572,7 +587,7 @@ def _start_chatgpt_backend_request(
             wrapped_upstream = ManagedAuthUpstream(
                 upstream,
                 candidate,
-                session_id=session_id,
+                session_id=candidate_session_id,
                 release_hook=(lambda sid=slot_id: release_chatgpt_connection_slot(sid)),
             )
             wrapped_upstream.chatmock_candidate_label = str(candidate.get("label") or "").strip()

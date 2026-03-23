@@ -16,9 +16,11 @@ from chatmock.upstream_errors import extract_retry_after_unlock_ts
 from chatmock.upstream import (
     _build_invalid_request_retry_payloads,
     _candidate_attempt_limit_for_current_request,
+    _candidate_session_id_for_current_request,
     _flatten_response_history_items,
     _is_generic_invalid_request,
     _request_retry_limit_for_current_request,
+    _prompt_cache_key_for_current_request,
     _should_mutate_candidate_state,
     _is_undefined_text_value,
     _minimize_responses_payload,
@@ -231,10 +233,14 @@ class UpstreamRoutingTests(unittest.TestCase):
             self.assertFalse(_should_mutate_candidate_state())
             self.assertEqual(_request_retry_limit_for_current_request(), 0)
             self.assertEqual(_candidate_attempt_limit_for_current_request(99), 3)
+            self.assertIsNone(_candidate_session_id_for_current_request("sess_123"))
+            self.assertTrue(_prompt_cache_key_for_current_request("sess_123").startswith("test-"))
         with app.test_request_context(headers={}):
             self.assertTrue(_should_mutate_candidate_state())
             self.assertGreaterEqual(_request_retry_limit_for_current_request(), 0)
             self.assertEqual(_candidate_attempt_limit_for_current_request(99), 99)
+            self.assertEqual(_candidate_session_id_for_current_request("sess_123"), "sess_123")
+            self.assertEqual(_prompt_cache_key_for_current_request("sess_123"), "sess_123")
 
 
 if __name__ == "__main__":
