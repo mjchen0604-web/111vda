@@ -166,35 +166,21 @@ def _has_tail_assistant_prefill(messages: Any) -> bool:
 
 def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     extra: Dict[str, Any] = {}
-    passthrough_keys = (
-        "metadata",
-        "mcp_servers",
-        "context_management",
-        "container",
-        "output_config",
-        "output_format",
-        "inference_geo",
-        "temperature",
-        "top_p",
-        "top_k",
-    )
-    for key in passthrough_keys:
-        if key not in payload:
-            continue
-        value = payload.get(key)
-        if value is None:
-            continue
-        if _is_undefined_text_value(value):
-            continue
-        extra[key] = value
+    output_format = payload.get("output_format")
+    if isinstance(output_format, dict) and output_format:
+        extra["text"] = {"format": output_format}
+        return extra
 
-    stop_sequences = payload.get("stop_sequences")
-    if _is_undefined_text_value(stop_sequences):
-        stop_sequences = None
-    if isinstance(stop_sequences, list):
-        filtered = [item for item in stop_sequences if isinstance(item, str) and item]
-        if filtered:
-            extra["stop_sequences"] = filtered
+    output_config = payload.get("output_config")
+    if isinstance(output_config, dict):
+        raw_format = output_config.get("format")
+        if isinstance(raw_format, dict) and raw_format:
+            extra["text"] = {"format": raw_format}
+            return extra
+        if isinstance(raw_format, str):
+            normalized = raw_format.strip().lower()
+            if normalized in ("json", "json_object"):
+                extra["text"] = {"format": {"type": "json_object"}}
     return extra
 
 
