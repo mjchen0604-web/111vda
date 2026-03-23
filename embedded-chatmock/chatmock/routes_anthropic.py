@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Dict, List, Tuple
 
@@ -177,6 +178,48 @@ def _build_anthropic_extra_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         extra[key] = value
 
     return extra
+
+
+def _unsupported_parameter_name(error_info: Dict[str, Any] | None) -> str:
+    if not isinstance(error_info, dict):
+        return ""
+    raw_message = str(error_info.get("raw_message") or "").strip()
+    if not raw_message:
+        return ""
+    match = re.search(r"Unsupported parameter:\s*([A-Za-z0-9_]+)", raw_message)
+    if not match:
+        return ""
+    return match.group(1).strip().lower()
+
+
+def _retry_anthropic_without_unsupported_param(
+    extra_payload: Dict[str, Any],
+    error_info: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    unsupported = _unsupported_parameter_name(error_info)
+    if not unsupported:
+        return None
+    normalized_extra = dict(extra_payload or {})
+    removable_keys = {
+        "temperature",
+        "top_p",
+        "top_k",
+        "metadata",
+        "mcp_servers",
+        "context_management",
+        "container",
+        "output_config",
+        "output_format",
+        "inference_geo",
+        "stop_sequences",
+        "max_output_tokens",
+    }
+    if unsupported not in removable_keys:
+        return None
+    if unsupported not in normalized_extra:
+        return None
+    normalized_extra.pop(unsupported, None)
+    return normalized_extra
 
 
 def _resolve_bridge_instructions(model: str, payload: Dict[str, Any]) -> str | None:
@@ -1015,7 +1058,9 @@ def messages() -> Response:
     attempt_limit = _upstream_attempt_limit(is_stream, model, service_tier)
     last_error_info: Dict[str, Any] | None = None
     upstream = None
-    for attempt_index in range(attempt_limit):
+    unsupported_retry_budget = 6
+    attempt_index = 0
+    while attempt_index < attempt_limit:
         upstream, error_resp = start_upstream_request(
             model,
             effective_input_items,
@@ -1031,7 +1076,13 @@ def messages() -> Response:
         if error_resp is not None:
             error_info = error_info_from_flask_response("chatcore", "request_start", error_resp)
             last_error_info = error_info
+            retry_extra_payload = _retry_anthropic_without_unsupported_param(extra_payload, error_info)
+            if retry_extra_payload is not None and unsupported_retry_budget > 0:
+                extra_payload = retry_extra_payload
+                unsupported_retry_budget -= 1
+                continue
             if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
+                attempt_index += 1
                 continue
             _log_invalid_request_diagnostic(
                 "INVALID REQUEST /v1/messages request_start",
@@ -1075,7 +1126,13 @@ def messages() -> Response:
                         retry_upstream,
                     )
                 last_error_info = error_info
+            retry_extra_payload = _retry_anthropic_without_unsupported_param(extra_payload, error_info)
+            if retry_extra_payload is not None and unsupported_retry_budget > 0:
+                extra_payload = retry_extra_payload
+                unsupported_retry_budget -= 1
+                continue
             if not is_stream and should_retry_next_candidate(error_info) and attempt_index + 1 < attempt_limit:
+                attempt_index += 1
                 continue
             _log_invalid_request_diagnostic(
                 "INVALID REQUEST /v1/messages upstream_http",

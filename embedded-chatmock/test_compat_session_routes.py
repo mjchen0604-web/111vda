@@ -88,10 +88,10 @@ class DummyHTTPInvalidRequestUpstream:
     reason = "Bad Request"
     chatmock_source = "chatgpt-backend"
 
-    def __init__(self):
+    def __init__(self, message="Invalid request"):
         body = {
             "error": {
-                "message": "Invalid request",
+                "message": message,
                 "type": "invalid_request_error",
                 "param": "",
                 "code": None,
@@ -502,6 +502,35 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_invalid")
         self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
+
+    def test_anthropic_nonstream_retries_without_unsupported_temperature(self):
+        calls = []
+
+        def stub(model, input_items, **kwargs):
+            calls.append({"extra_payload": dict(kwargs.get("extra_payload") or {})})
+            if len(calls) == 1:
+                return DummyHTTPInvalidRequestUpstream("Unsupported parameter: temperature"), None
+            return DummyUpstream("resp_messages_temperature_retry"), None
+
+        original = routes_anthropic.start_upstream_request
+        routes_anthropic.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/messages",
+                json={
+                    "model": "gpt-5.4-fast-high",
+                    "stream": False,
+                    "temperature": 1,
+                    "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                },
+            )
+        finally:
+            routes_anthropic.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["extra_payload"].get("temperature"), 1)
+        self.assertNotIn("temperature", calls[1]["extra_payload"])
 
     def test_chat_completions_nonstream_retries_without_previous_response_id_on_generic_invalid_request(self):
         calls = []
