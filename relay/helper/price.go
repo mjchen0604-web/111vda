@@ -17,14 +17,31 @@ import (
 
 const claudeCacheCreation1hMultiplier = 6 / 3.75
 
+func resolveBillingModelName(info *relaycommon.RelayInfo) string {
+	if info == nil {
+		return ""
+	}
+	channelType := 0
+	if info.ChannelMeta != nil {
+		channelType = info.ChannelType
+	}
+	return common.ResolveBillingModelName(info.OriginModelName, channelType)
+}
+
 func allowUnsetRatioForRelayModel(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
 	if operation_setting.SelfUseModeEnabled || info.UserSetting.AcceptUnsetRatioModel {
 		return true
 	}
 	if info.UsingGroup == "" || info.OriginModelName == "" {
 		return false
 	}
-	return model.HasEnabledChannelTypeForModel(info.UsingGroup, common.ResolveBillingModelName(info.OriginModelName, info.ChannelType), constant.ChannelTypeChatCore)
+	if info.ChannelMeta == nil && common.IsPublicSkinnedModel(info.OriginModelName) {
+		return true
+	}
+	return model.HasEnabledChannelTypeForModel(info.UsingGroup, resolveBillingModelName(info), constant.ChannelTypeChatCore)
 }
 
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
@@ -52,7 +69,7 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
-	billingModelName := common.ResolveBillingModelName(info.OriginModelName, info.ChannelType)
+	billingModelName := resolveBillingModelName(info)
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 	groupRatioInfo := HandleGroupRatio(c, info)
 
@@ -150,7 +167,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
-	billingModelName := common.ResolveBillingModelName(info.OriginModelName, info.ChannelType)
+	billingModelName := resolveBillingModelName(info)
 	consumeRatio := ratio_setting.GetModelConsumeRatio(billingModelName)
 
 	modelPrice, success := ratio_setting.GetModelPrice(billingModelName, true)

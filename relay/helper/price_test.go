@@ -81,3 +81,22 @@ func TestModelPriceHelperPerCallAppliesConsumeRatio(t *testing.T) {
 		t.Fatalf("expected per-call quota 30000, got %d", priceData.Quota)
 	}
 }
+
+func TestModelPriceHelperSkinnedChatCoreModelWithoutChannelMetaDoesNotPanic(t *testing.T) {
+	ratio_setting.InitRatioSettings()
+
+	ctx := newPriceTestContext()
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "claude-sonnet-4-6",
+		UsingGroup:      "default",
+		UserGroup:       "default",
+	}
+
+	priceData, err := ModelPriceHelper(ctx, info, 100, &types.TokenCountMeta{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if priceData.ModelRatio <= 0 {
+		t.Fatalf("expected mapped chatcore pricing ratio, got %v", priceData.ModelRatio)
+	}
+}
