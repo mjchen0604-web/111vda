@@ -250,15 +250,15 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertNotIn("max_output_tokens", captured["extra_payload"])
         self.assertEqual(captured["extra_payload"].get("temperature"), 0.2)
         self.assertEqual(captured["extra_payload"].get("top_p"), 0.9)
-        self.assertEqual(captured["extra_payload"].get("top_k"), 10)
+        self.assertNotIn("top_k", captured["extra_payload"])
         self.assertNotIn("metadata", captured["extra_payload"])
-        self.assertEqual(captured["extra_payload"].get("mcp_servers"), [{"name": "demo"}])
-        self.assertEqual(captured["extra_payload"].get("context_management"), {"mode": "windowed"})
-        self.assertEqual(captured["extra_payload"].get("container"), {"id": "container_demo"})
-        self.assertEqual(captured["extra_payload"].get("output_config"), {"format": "json"})
-        self.assertEqual(captured["extra_payload"].get("output_format"), {"type": "json_schema"})
-        self.assertEqual(captured["extra_payload"].get("inference_geo"), "eu")
-        self.assertEqual(captured["extra_payload"].get("stop_sequences"), ["STOP"])
+        self.assertNotIn("mcp_servers", captured["extra_payload"])
+        self.assertNotIn("context_management", captured["extra_payload"])
+        self.assertNotIn("container", captured["extra_payload"])
+        self.assertNotIn("output_config", captured["extra_payload"])
+        self.assertNotIn("output_format", captured["extra_payload"])
+        self.assertNotIn("inference_geo", captured["extra_payload"])
+        self.assertNotIn("stop_sequences", captured["extra_payload"])
 
     def test_anthropic_messages_ignores_undefined_sentinel_fields(self):
         captured = {}
