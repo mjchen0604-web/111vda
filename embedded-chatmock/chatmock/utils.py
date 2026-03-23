@@ -1836,14 +1836,22 @@ def _state_for_label(label: str) -> Dict[str, Any]:
 
 def _state_for_candidate(label: str, account_id: str | None = None) -> Dict[str, Any]:
     state = _state_for_label(label)
+    now = time.time()
     account_cooldown_until = _get_account_cooldown(str(account_id or "").strip())
     if account_cooldown_until > float(state.get("cooldown_until") or 0.0):
-        now = time.time()
         state["cooldown_until"] = account_cooldown_until
         state["cooldown_remaining"] = max(0, int(account_cooldown_until - now))
         state["unlock_at"] = datetime.datetime.fromtimestamp(account_cooldown_until, datetime.timezone.utc).isoformat()
         if not state.get("last_classification"):
             state["last_classification"] = "rate_limited"
+    if int(state.get("codex_cooldown_remaining") or 0) > 0 and not state.get("unlock_at"):
+        codex_cooldown_until = float(state.get("codex_cooldown_until") or 0.0)
+        if codex_cooldown_until > now:
+            state["unlock_at"] = datetime.datetime.fromtimestamp(codex_cooldown_until, datetime.timezone.utc).isoformat()
+    if int(state.get("cooldown_remaining") or 0) > 0:
+        state["status"] = "cooldown_rate_limited"
+    elif int(state.get("codex_cooldown_remaining") or 0) > 0:
+        state["status"] = "cooldown_rate_limited"
     return state
 
 

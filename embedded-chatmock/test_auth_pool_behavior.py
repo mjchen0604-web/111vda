@@ -19,6 +19,7 @@ from chatmock.utils import (
     _remove_account_state,
     _remove_label_state,
     _preferred_chatgpt_auth_candidate_for_hint,
+    _state_for_candidate,
     _state_for_label,
     _parse_auth_files_env,
     _preferred_chatgpt_auth_candidate_for_session,
@@ -222,6 +223,8 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         handle_chatgpt_candidate_failure(candidate1, info)
         self.assertTrue(is_auth_candidate_blocked(candidate1))
         self.assertTrue(is_auth_candidate_blocked(candidate2))
+        state = _state_for_candidate("acc01/auth.json", "same-account")
+        self.assertEqual(state["status"], "cooldown_rate_limited")
 
     def test_codex_limit_headers_block_only_exhausted_candidate(self):
         candidate1 = {"label": "acc01/auth.json", "account_id": "same-account"}

@@ -152,6 +152,22 @@ def _parse_retry_after_header(value: Any) -> float | None:
     return None
 
 
+def _extract_nested_number(payload: Any, *keys: str) -> float | None:
+    if not isinstance(payload, Mapping):
+        return None
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    error_block = payload.get("error")
+    if isinstance(error_block, Mapping):
+        for key in keys:
+            value = error_block.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+    return None
+
+
 def _parse_absolute_reset_header(value: Any) -> float | None:
     text = _compact_string(value)
     if not text:
@@ -217,6 +233,19 @@ def _extract_retry_after_from_headers(info: Mapping[str, Any]) -> float | None:
     return None
 
 
+def _extract_retry_after_from_body(info: Mapping[str, Any]) -> float | None:
+    raw_body = info.get("raw_body")
+    if not isinstance(raw_body, Mapping):
+        return None
+    absolute = _extract_nested_number(raw_body, "resets_at", "reset_at")
+    if isinstance(absolute, (int, float)) and absolute > 1000000000:
+        return float(absolute)
+    relative = _extract_nested_number(raw_body, "resets_in_seconds")
+    if isinstance(relative, (int, float)) and relative > 0:
+        return datetime.datetime.now(datetime.timezone.utc).timestamp() + float(relative)
+    return None
+
+
 def extract_retry_after_unlock_ts(info: Mapping[str, Any]) -> float | None:
     raw_message = _compact_string(info.get("raw_message"))
     haystack = raw_message or _error_text_raw(info)
@@ -240,7 +269,10 @@ def extract_retry_after_unlock_ts(info: Mapping[str, Any]) -> float | None:
                     return dt.timestamp()
                 except Exception:
                     continue
-    return _extract_retry_after_from_headers(info)
+    from_headers = _extract_retry_after_from_headers(info)
+    if from_headers is not None:
+        return from_headers
+    return _extract_retry_after_from_body(info)
 
 
 def build_error_info(

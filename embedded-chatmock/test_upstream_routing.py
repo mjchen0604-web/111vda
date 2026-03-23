@@ -21,6 +21,7 @@ from chatmock.upstream import (
     _is_generic_invalid_request,
     _request_retry_limit_for_current_request,
     _prompt_cache_key_for_current_request,
+    _should_record_candidate_failure_state,
     _should_mutate_candidate_state,
     _is_undefined_text_value,
     _minimize_responses_payload,
@@ -145,6 +146,22 @@ class UpstreamRoutingTests(unittest.TestCase):
         unlock_ts = extract_retry_after_unlock_ts(info)
         self.assertIsNotNone(unlock_ts)
 
+    def test_extract_retry_after_unlock_ts_uses_usage_limit_body_reset(self):
+        info = {
+            "raw_status": 429,
+            "raw_message": "The usage limit has been reached",
+            "raw_body": {
+                "error": {
+                    "type": "usage_limit_reached",
+                    "message": "The usage limit has been reached",
+                    "resets_at": 1774846915,
+                    "resets_in_seconds": 588793,
+                }
+            },
+        }
+        unlock_ts = extract_retry_after_unlock_ts(info)
+        self.assertEqual(unlock_ts, 1774846915)
+
     def test_minimized_rate_limit_message_keeps_real_unlock_time(self):
         app = Flask(__name__)
         app.config["CLIENT_METADATA_MINIMIZATION"] = True
@@ -255,12 +272,27 @@ class UpstreamRoutingTests(unittest.TestCase):
         app = Flask(__name__)
         with app.test_request_context(headers={"X-ChatCore-Test": "1"}):
             self.assertFalse(_should_mutate_candidate_state())
+            self.assertFalse(_should_record_candidate_failure_state(None))
             self.assertEqual(_request_retry_limit_for_current_request(), 0)
             self.assertEqual(_candidate_attempt_limit_for_current_request(99), 3)
             self.assertIsNone(_candidate_session_id_for_current_request("sess_123"))
             self.assertTrue(_prompt_cache_key_for_current_request("sess_123").startswith("test-"))
+            self.assertTrue(
+                _should_record_candidate_failure_state(
+                    {
+                        "raw_status": 429,
+                        "raw_message": "The usage limit has been reached",
+                        "raw_body": {
+                            "error": {
+                                "resets_at": 1774846915,
+                            }
+                        },
+                    }
+                )
+            )
         with app.test_request_context(headers={}):
             self.assertTrue(_should_mutate_candidate_state())
+            self.assertTrue(_should_record_candidate_failure_state({"raw_status": 429, "raw_message": "Rate limit exceeded"}))
             self.assertGreaterEqual(_request_retry_limit_for_current_request(), 0)
             self.assertEqual(_candidate_attempt_limit_for_current_request(99), 99)
             self.assertEqual(_candidate_session_id_for_current_request("sess_123"), "sess_123")

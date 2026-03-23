@@ -17,8 +17,10 @@ from .session import ensure_session_id
 from .upstream_errors import (
     build_error_info,
     build_openai_error_response,
+    classify_error,
     error_info_from_http_response,
     normalized_error_payload,
+    extract_retry_after_unlock_ts,
 )
 from .utils import (
     ManagedAuthUpstream,
@@ -339,6 +341,18 @@ def _should_mutate_candidate_state() -> bool:
     return str(marker).strip().lower() not in ("1", "true", "yes", "on")
 
 
+def _should_record_candidate_failure_state(error_info: Dict[str, Any] | None = None) -> bool:
+    if _should_mutate_candidate_state():
+        return True
+    if not isinstance(error_info, dict):
+        return False
+    classification = classify_error(error_info)
+    if classification not in ("rate_limited", "insufficient_balance"):
+        return False
+    unlock_ts = extract_retry_after_unlock_ts(error_info)
+    return isinstance(unlock_ts, (int, float)) and float(unlock_ts) > time.time()
+
+
 def _request_retry_limit_for_current_request() -> int:
     if _should_mutate_candidate_state():
         return get_request_retry_limit()
@@ -571,7 +585,7 @@ def _start_chatgpt_backend_request(
 
             if should_retry:
                 error_info = error_info_from_http_response("upstream", "http", upstream)
-                if _should_mutate_candidate_state():
+                if _should_record_candidate_failure_state(error_info):
                     handle_chatgpt_candidate_failure(candidate, error_info)
                 _release_auth_candidate_slot(candidate)
                 if has_more_candidates or has_more_rounds:
