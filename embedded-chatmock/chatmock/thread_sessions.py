@@ -115,9 +115,9 @@ def build_thread_session_state(
                 preferred_label = None
                 preferred_url = None
         elif not normalized_explicit_thread_id and not normalized_fork_from_thread_id:
-            resume_thread_id = None
-            preferred_label = None
-            preferred_url = None
+            # Treat the supplied payload as the next turn in the same thread.
+            # Many clients only send the latest user message together with a stable session_id.
+            turn_input_items = list(input_items)
 
     if normalized_fork_from_thread_id:
         thread_mode = "fork"

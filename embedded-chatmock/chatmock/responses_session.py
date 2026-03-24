@@ -47,30 +47,15 @@ def resolve_turn_state(
     if shallow_graft_mode_enabled() and explicit_thread_id is None:
         return list(full_input_items), None
 
-    effective_input_items = list(full_input_items)
-    effective_previous_response_id = explicit_thread_id
-    if isinstance(thread_session, dict):
-        if effective_previous_response_id is None:
-            stored_thread_id = thread_session.get("thread_id")
-            if isinstance(stored_thread_id, str) and stored_thread_id.strip():
-                effective_previous_response_id = stored_thread_id.strip()
-        if explicit_thread_id is None and thread_session.get("thread_mode") == "resume":
-            turn_input_items = thread_session.get("turn_input_items")
-            if isinstance(turn_input_items, list) and turn_input_items:
-                effective_input_items = list(turn_input_items)
-    return effective_input_items, effective_previous_response_id
+    return list(full_input_items), explicit_thread_id
 
 
 def should_skip_compaction_for_thread_resume(
     payload: Dict[str, Any],
     thread_session: Dict[str, Any] | None,
 ) -> bool:
-    if explicit_previous_response_id(payload) is not None:
-        return True
-    if not isinstance(thread_session, dict):
-        return False
-    stored_thread_id = thread_session.get("thread_id")
-    return isinstance(stored_thread_id, str) and bool(stored_thread_id.strip())
+    _ = thread_session
+    return explicit_previous_response_id(payload) is not None
 
 
 def save_response_session(
