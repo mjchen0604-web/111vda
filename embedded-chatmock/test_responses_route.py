@@ -399,7 +399,7 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(body["object"], "response.compaction")
         self.assertEqual(body["output"][0]["type"], "summary_text")
 
-    def test_v1_responses_does_not_resume_thread_state_by_default(self):
+    def test_v1_responses_resumes_thread_state_by_default(self):
         calls = []
 
         def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
@@ -475,8 +475,8 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(len(calls), 2)
-        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
-        self.assertEqual(len(calls[1]["input_items"]), 3)
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_first")
+        self.assertEqual(len(calls[1]["input_items"]), 2)
 
     def test_v1_responses_retries_once_without_previous_response_id(self):
         calls = []

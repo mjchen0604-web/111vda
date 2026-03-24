@@ -321,7 +321,7 @@ class CompatSessionRouteTests(unittest.TestCase):
         self.assertEqual(captured["tools"], [])
         self.assertEqual(captured["tool_choice"], "auto")
 
-    def test_chat_completions_does_not_resume_previous_response_id_by_default(self):
+    def test_chat_completions_resumes_previous_response_id_by_default(self):
         calls = []
 
         def stub(model, input_items, **kwargs):
@@ -356,10 +356,10 @@ class CompatSessionRouteTests(unittest.TestCase):
         finally:
             routes_openai.start_upstream_request = original
 
-        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
-        self.assertEqual(len(calls[1]["input_items"]), 3)
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_chat_1")
+        self.assertEqual(len(calls[1]["input_items"]), 2)
 
-    def test_anthropic_messages_does_not_resume_previous_response_id_by_default(self):
+    def test_anthropic_messages_resumes_previous_response_id_by_default(self):
         calls = []
 
         def stub(model, input_items, **kwargs):
@@ -394,10 +394,10 @@ class CompatSessionRouteTests(unittest.TestCase):
         finally:
             routes_anthropic.start_upstream_request = original
 
-        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
-        self.assertEqual(len(calls[1]["input_items"]), 3)
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_anthropic_1")
+        self.assertEqual(len(calls[1]["input_items"]), 2)
 
-    def test_ollama_chat_does_not_resume_previous_response_id_by_default(self):
+    def test_ollama_chat_resumes_previous_response_id_by_default(self):
         calls = []
 
         def stub(model, input_items, **kwargs):
@@ -432,8 +432,8 @@ class CompatSessionRouteTests(unittest.TestCase):
         finally:
             routes_ollama.start_upstream_request = original
 
-        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
-        self.assertEqual(len(calls[1]["input_items"]), 3)
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_ollama_1")
+        self.assertEqual(len(calls[1]["input_items"]), 2)
 
     def test_anthropic_stream_retries_without_previous_response_id(self):
         calls = []

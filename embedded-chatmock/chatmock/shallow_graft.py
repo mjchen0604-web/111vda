@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
 
+from flask import current_app, has_app_context
 
 def shallow_graft_mode_enabled() -> bool:
-    return True
+    if has_app_context():
+        configured = current_app.config.get("SHALLOW_GRAFT_MODE")
+        if isinstance(configured, bool):
+            return configured
+        if isinstance(configured, str):
+            normalized = configured.strip().lower()
+            if normalized in ("1", "true", "yes", "on", "enabled"):
+                return True
+            if normalized in ("0", "false", "no", "off", "disabled"):
+                return False
+    raw = (os.getenv("CHATMOCK_SHALLOW_GRAFT_MODE") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on", "enabled"):
+        return True
+    if raw in ("0", "false", "no", "off", "disabled"):
+        return False
+    return False
 
 
 def explicit_previous_response_id(payload: Dict[str, Any]) -> str | None:
