@@ -12,6 +12,7 @@ from .context_compaction import build_compaction_summary, maybe_compact_input_it
 from .limits import record_rate_limits_from_response
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .responses_session import resolve_turn_state, save_response_session, should_retry_without_previous_response
+from .responses_session import should_skip_compaction_for_thread_resume
 from .reasoning import (
     allowed_efforts_for_model,
     apply_reasoning_to_message,
@@ -244,11 +245,21 @@ def _prepare_route_turn_state(
     *,
     thread_session: Dict[str, Any] | None,
 ) -> tuple[List[Dict[str, Any]], str | None, Dict[str, Any] | None, List[Dict[str, Any]], List[Dict[str, Any]], str | None, Dict[str, Any]]:
-    next_input_items, next_instructions, compaction_meta = maybe_compact_input_items(
-        payload,
-        input_items,
-        instructions,
-    )
+    if should_skip_compaction_for_thread_resume(payload, thread_session):
+        next_input_items = list(input_items)
+        next_instructions = instructions
+        compaction_meta = {
+            "applied": False,
+            "reason": "skipped_for_thread_resume",
+            "original_items": len(input_items or []),
+            "kept_items": len(input_items or []),
+        }
+    else:
+        next_input_items, next_instructions, compaction_meta = maybe_compact_input_items(
+            payload,
+            input_items,
+            instructions,
+        )
     full_input_items = list(next_input_items)
     effective_input_items, effective_previous_response_id = resolve_turn_state(
         payload,

@@ -8,6 +8,7 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.app import create_app
+from chatmock.responses_session import should_skip_compaction_for_thread_resume
 import chatmock.routes_openai as routes_openai
 from chatmock.thread_sessions import clear_thread_session
 from chatmock.upstream_errors import normalized_error_payload
@@ -477,6 +478,95 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_first")
         self.assertEqual(len(calls[1]["input_items"]), 2)
+
+    def test_thread_resume_skips_compaction(self):
+        payload = {"session_id": "sess-chain", "context_management": {"max_input_items": 2}}
+        self.assertTrue(
+            should_skip_compaction_for_thread_resume(
+                payload,
+                {"thread_id": "resp_prev"},
+            )
+        )
+
+    def test_v1_responses_resume_does_not_compact_history(self):
+        calls = []
+
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            calls.append(
+                {
+                    "model": model,
+                    "input_items": input_items,
+                    "instructions": instructions,
+                    "extra_payload": dict(extra_payload or {}),
+                }
+            )
+            response_id = "resp_first" if len(calls) == 1 else "resp_second"
+            return (
+                DummyUpstream(
+                    {
+                        "id": response_id,
+                        "object": "response",
+                        "created_at": 123,
+                        "status": "completed",
+                        "model": model,
+                        "output": [],
+                        "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                    }
+                ),
+                None,
+            )
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-chain-compact",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello"}],
+                        }
+                    ],
+                },
+            )
+            self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-chain-compact",
+                    "context_management": {"max_input_items": 2, "preserve_recent_items": 1},
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello"}],
+                        },
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "previous answer"}],
+                        },
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "new turn"}],
+                        },
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_first")
+        self.assertEqual(len(calls[1]["input_items"]), 2)
+        self.assertNotIn("[Gateway compacted conversation summary]", str(calls[1]["instructions"] or ""))
 
     def test_v1_responses_retries_once_without_previous_response_id(self):
         calls = []

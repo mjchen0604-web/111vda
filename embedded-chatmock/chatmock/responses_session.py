@@ -61,6 +61,18 @@ def resolve_turn_state(
     return effective_input_items, effective_previous_response_id
 
 
+def should_skip_compaction_for_thread_resume(
+    payload: Dict[str, Any],
+    thread_session: Dict[str, Any] | None,
+) -> bool:
+    if explicit_previous_response_id(payload) is not None:
+        return True
+    if not isinstance(thread_session, dict):
+        return False
+    stored_thread_id = thread_session.get("thread_id")
+    return isinstance(stored_thread_id, str) and bool(stored_thread_id.strip())
+
+
 def save_response_session(
     thread_session: Dict[str, Any] | None,
     *,

@@ -10,7 +10,12 @@ from .config import BASE_INSTRUCTIONS, CLAUDE_OPUS_INSTRUCTIONS, GPT5_CODEX_INST
 from .context_compaction import maybe_compact_input_items
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .limits import record_rate_limits_from_response
-from .responses_session import resolve_turn_state, save_response_session, should_retry_without_previous_response
+from .responses_session import (
+    resolve_turn_state,
+    save_response_session,
+    should_retry_without_previous_response,
+    should_skip_compaction_for_thread_resume,
+)
 from .reasoning import (
     allowed_efforts_for_model,
     build_reasoning_param,
@@ -998,12 +1003,13 @@ def messages() -> Response:
         reasoning_overrides,
         allowed_efforts=allowed_efforts_for_model(model),
     )
-    input_items, instructions, _ = maybe_compact_input_items(payload, input_items, instructions)
     thread_session = resolve_thread_session_state(
         payload=payload,
         input_items=input_items,
         headers=request.headers,
     )
+    if not should_skip_compaction_for_thread_resume(payload, thread_session):
+        input_items, instructions, _ = maybe_compact_input_items(payload, input_items, instructions)
     full_input_items = list(input_items)
     effective_input_items, effective_previous_response_id = resolve_turn_state(
         payload,
