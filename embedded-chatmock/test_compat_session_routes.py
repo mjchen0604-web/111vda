@@ -8,6 +8,7 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.app import create_app
+from chatmock.conversation_history import clear_conversation_history
 import chatmock.routes_anthropic as routes_anthropic
 import chatmock.routes_ollama as routes_ollama
 import chatmock.routes_openai as routes_openai
@@ -109,6 +110,10 @@ class CompatSessionRouteTests(unittest.TestCase):
         clear_thread_session("sess-chat")
         clear_thread_session("sess-anthropic")
         clear_thread_session("sess-ollama")
+        clear_conversation_history("sess-chat")
+        clear_conversation_history("sess-anthropic")
+        clear_conversation_history("sess-ollama")
+        clear_conversation_history("sess-chat-history")
         self.app = create_app()
         self.client = self.app.test_client()
 
@@ -356,6 +361,69 @@ class CompatSessionRouteTests(unittest.TestCase):
         finally:
             routes_openai.start_upstream_request = original
 
+        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
+        self.assertEqual(len(calls[1]["input_items"]), 3)
+
+    def test_chat_completions_replays_history_when_client_only_sends_current_turn(self):
+        calls = []
+
+        class HistoryUpstream:
+            status_code = 200
+            chatmock_source = "test"
+
+            def __init__(self, response_id: str):
+                self._lines = [
+                    f"data: {json.dumps({'type': 'response.completed', 'response': {'id': response_id, 'usage': {'input_tokens': 1, 'output_tokens': 2, 'total_tokens': 3}, 'output': [{'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'remembered'}]}]}}, ensure_ascii=False)}".encode(
+                        "utf-8"
+                    )
+                ]
+
+            def iter_lines(self, decode_unicode=False):
+                for line in self._lines:
+                    if decode_unicode:
+                        yield line.decode("utf-8", errors="ignore")
+                    else:
+                        yield line
+
+            def close(self):
+                return None
+
+            def mark_success(self):
+                return None
+
+            def mark_failure(self, *args, **kwargs):
+                return None
+
+        def stub(model, input_items, **kwargs):
+            calls.append({"input_items": input_items, "extra_payload": dict(kwargs.get("extra_payload") or {})})
+            response_id = "resp_chat_hist_1" if len(calls) == 1 else "resp_chat_hist_2"
+            return HistoryUpstream(response_id), None
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-chat-history",
+                    "messages": [{"role": "user", "content": "remember secret"}],
+                },
+            )
+            self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-chat-history",
+                    "messages": [{"role": "user", "content": "what was the secret?"}],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(len(calls), 2)
         self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
         self.assertEqual(len(calls[1]["input_items"]), 3)
 

@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from flask import Blueprint, Response, current_app, has_app_context, jsonify, make_response, request
 
 from .config import BASE_INSTRUCTIONS, CLAUDE_OPUS_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS, should_use_claude_opus_instructions, should_use_gpt5_codex_instructions
+from .conversation_history import append_conversation_history, replay_conversation_history, response_items_from_chat_message
 from .context_compaction import build_compaction_summary, maybe_compact_input_items
 from .limits import record_rate_limits_from_response
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
@@ -245,21 +246,24 @@ def _prepare_route_turn_state(
     *,
     thread_session: Dict[str, Any] | None,
 ) -> tuple[List[Dict[str, Any]], str | None, Dict[str, Any] | None, List[Dict[str, Any]], List[Dict[str, Any]], str | None, Dict[str, Any]]:
+    replayed_input_items, replay_meta = replay_conversation_history(thread_session, input_items)
     if should_skip_compaction_for_thread_resume(payload, thread_session):
-        next_input_items = list(input_items)
+        next_input_items = list(replayed_input_items)
         next_instructions = instructions
         compaction_meta = {
             "applied": False,
             "reason": "skipped_for_thread_resume",
-            "original_items": len(input_items or []),
-            "kept_items": len(input_items or []),
+            "original_items": len(replayed_input_items or []),
+            "kept_items": len(replayed_input_items or []),
         }
     else:
         next_input_items, next_instructions, compaction_meta = maybe_compact_input_items(
             payload,
-            input_items,
+            replayed_input_items,
             instructions,
         )
+    if replay_meta.get("applied"):
+        compaction_meta = {**compaction_meta, "history_replay": replay_meta}
     full_input_items = list(next_input_items)
     effective_input_items, effective_previous_response_id = resolve_turn_state(
         payload,
@@ -1801,6 +1805,11 @@ def chat_completions() -> Response:
         response_id=response_id,
         full_input_items=full_input_items,
         upstream=completed_upstream,
+    )
+    append_conversation_history(
+        thread_session,
+        full_input_items,
+        response_items_from_chat_message(message if isinstance(message, dict) else None),
     )
     tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
     completion = {

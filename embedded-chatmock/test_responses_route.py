@@ -8,6 +8,7 @@ CHATMOCK_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(CHATMOCK_ROOT))
 
 from chatmock.app import create_app
+from chatmock.conversation_history import clear_conversation_history
 from chatmock.responses_session import should_skip_compaction_for_thread_resume
 import chatmock.routes_openai as routes_openai
 from chatmock.thread_sessions import clear_thread_session
@@ -87,6 +88,9 @@ class ResponsesRouteTests(unittest.TestCase):
     def setUp(self):
         clear_thread_session("sess-chain")
         clear_thread_session("sess-retry")
+        clear_conversation_history("sess-chain")
+        clear_conversation_history("sess-retry")
+        clear_conversation_history("sess-history")
         self.app = create_app()
         self.client = self.app.test_client()
 
@@ -478,6 +482,84 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
         self.assertEqual(len(calls[1]["input_items"]), 3)
+
+    def test_v1_responses_replays_history_when_client_only_sends_current_turn(self):
+        calls = []
+
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            calls.append(
+                {
+                    "model": model,
+                    "input_items": input_items,
+                    "extra_payload": dict(extra_payload or {}),
+                }
+            )
+            response_id = "resp_hist_1" if len(calls) == 1 else "resp_hist_2"
+            output = [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "remembered"}],
+                }
+            ]
+            return (
+                DummyUpstream(
+                    {
+                        "id": response_id,
+                        "object": "response",
+                        "created_at": 123,
+                        "status": "completed",
+                        "model": model,
+                        "output": output,
+                        "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                    }
+                ),
+                None,
+            )
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-history",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "remember secret"}],
+                        }
+                    ],
+                },
+            )
+            second = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-history",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "what was the secret?"}],
+                        }
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
+        self.assertEqual(len(calls[1]["input_items"]), 3)
+        self.assertEqual(calls[1]["input_items"][0]["content"][0]["text"], "remember secret")
+        self.assertEqual(calls[1]["input_items"][1]["content"][0]["text"], "remembered")
+        self.assertEqual(calls[1]["input_items"][2]["content"][0]["text"], "what was the secret?")
 
     def test_thread_resume_skips_compaction(self):
         payload = {

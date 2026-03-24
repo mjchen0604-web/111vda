@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+from .conversation_history import append_conversation_history, response_items_from_response_obj
 from .shallow_graft import explicit_previous_response_id, shallow_graft_mode_enabled
 from .thread_sessions import save_thread_session
 from .upstream_errors import normalized_error_payload
@@ -82,4 +83,9 @@ def save_response_session(
         candidate_label=str(getattr(upstream, "chatmock_candidate_label", "") or ""),
         candidate_url=str(getattr(upstream, "chatmock_candidate_url", "") or ""),
         input_items=full_input_items,
+    )
+    append_conversation_history(
+        thread_session,
+        full_input_items,
+        response_items_from_response_obj(response_obj if isinstance(response_obj, dict) else None),
     )

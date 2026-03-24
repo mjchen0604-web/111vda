@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from flask import Blueprint, Response, current_app, jsonify, make_response, request, stream_with_context
 
 from .config import BASE_INSTRUCTIONS, CLAUDE_OPUS_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS, should_use_claude_opus_instructions, should_use_gpt5_codex_instructions
+from .conversation_history import append_conversation_history, replay_conversation_history, response_items_from_chat_message
 from .context_compaction import maybe_compact_input_items
 from .limits import record_rate_limits_from_response
 from .http import build_cors_headers
@@ -373,6 +374,7 @@ def ollama_chat() -> Response:
         input_items=input_items,
         headers=request.headers,
     )
+    input_items, _ = replay_conversation_history(thread_session, input_items)
     if not should_skip_compaction_for_thread_resume(payload, thread_session):
         input_items, compaction_instructions, _ = maybe_compact_input_items(
             payload,
@@ -1030,6 +1032,11 @@ def ollama_chat() -> Response:
     out_json.update(_OLLAMA_FAKE_EVAL)
     if verbose:
         _log_json("OUT POST /api/chat", out_json)
+    append_conversation_history(
+        thread_session,
+        full_input_items,
+        response_items_from_chat_message(out_json.get("message") if isinstance(out_json, dict) else None),
+    )
     resp = make_response(jsonify(out_json), 200)
     for k, v in build_cors_headers().items():
         resp.headers.setdefault(k, v)

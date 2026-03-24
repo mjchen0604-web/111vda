@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple
 from flask import Blueprint, Response, current_app, jsonify, make_response, request
 
 from .config import BASE_INSTRUCTIONS, CLAUDE_OPUS_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS, should_use_claude_opus_instructions, should_use_gpt5_codex_instructions
+from .conversation_history import append_conversation_history, replay_conversation_history, response_items_from_anthropic_message
 from .context_compaction import maybe_compact_input_items
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .limits import record_rate_limits_from_response
@@ -1008,6 +1009,7 @@ def messages() -> Response:
         input_items=input_items,
         headers=request.headers,
     )
+    input_items, _ = replay_conversation_history(thread_session, input_items)
     if not should_skip_compaction_for_thread_resume(payload, thread_session):
         input_items, instructions, _ = maybe_compact_input_items(payload, input_items, instructions)
     full_input_items = list(input_items)
@@ -1218,6 +1220,11 @@ def messages() -> Response:
         response_id=response_id,
         full_input_items=full_input_items,
         upstream=completed_upstream,
+    )
+    append_conversation_history(
+        thread_session,
+        full_input_items,
+        response_items_from_anthropic_message(message_obj if isinstance(message_obj, dict) else None),
     )
     resp = make_response(jsonify(message_obj), completed_upstream.status_code)
     for k, v in build_cors_headers().items():
