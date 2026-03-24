@@ -18,6 +18,23 @@ def _message(role: str, text: str):
 
 
 class ContextCompactionTests(unittest.TestCase):
+    def test_default_is_disabled_without_context_management(self):
+        input_items = []
+        for idx in range(8):
+            role = "user" if idx % 2 == 0 else "assistant"
+            input_items.append(_message(role, f"turn-{idx}"))
+
+        compacted_items, compacted_instructions, meta = maybe_compact_input_items(
+            {},
+            input_items,
+            "Base instructions",
+        )
+
+        self.assertFalse(meta["applied"])
+        self.assertEqual(meta["reason"], "disabled")
+        self.assertEqual(compacted_items, input_items)
+        self.assertEqual(compacted_instructions, "Base instructions")
+
     def test_compacts_long_history_and_keeps_recent_items(self):
         payload = {
             "context_management": {

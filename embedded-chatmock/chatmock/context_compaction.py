@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict, List, Tuple
 
 
-_DEFAULT_ENABLED = True
+_DEFAULT_ENABLED = False
 _DEFAULT_MIN_INPUT_ITEMS = 12
 _DEFAULT_MAX_INPUT_ITEMS = 24
 _DEFAULT_PRESERVE_RECENT_ITEMS = 8
@@ -51,7 +51,10 @@ def _load_context_management(payload: Dict[str, Any] | None) -> Dict[str, Any]:
 
 def _resolve_settings(payload: Dict[str, Any] | None) -> Dict[str, int | bool]:
     raw = _load_context_management(payload)
-    enabled = _coerce_bool(raw.get("enabled"), _DEFAULT_ENABLED)
+    enabled_default = _DEFAULT_ENABLED
+    if isinstance(raw, dict) and raw:
+        enabled_default = True
+    enabled = _coerce_bool(raw.get("enabled"), enabled_default)
     mode = raw.get("mode") or raw.get("type") or raw.get("strategy")
     if isinstance(mode, str) and mode.strip().lower() in ("disabled", "off", "none"):
         enabled = False
