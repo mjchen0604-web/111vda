@@ -8,14 +8,12 @@ from flask import Blueprint, Response, current_app, jsonify, make_response, requ
 
 from .config import BASE_INSTRUCTIONS, CLAUDE_OPUS_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS, should_use_claude_opus_instructions, should_use_gpt5_codex_instructions
 from .conversation_history import append_conversation_history, replay_conversation_history, response_items_from_anthropic_message
-from .context_compaction import maybe_compact_input_items
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .limits import record_rate_limits_from_response
 from .responses_session import (
     resolve_turn_state,
     save_response_session,
     should_retry_without_previous_response,
-    should_skip_compaction_for_thread_resume,
 )
 from .reasoning import (
     allowed_efforts_for_model,
@@ -1010,8 +1008,6 @@ def messages() -> Response:
         headers=request.headers,
     )
     input_items, _ = replay_conversation_history(thread_session, input_items)
-    if not should_skip_compaction_for_thread_resume(payload, thread_session):
-        input_items, instructions, _ = maybe_compact_input_items(payload, input_items, instructions)
     full_input_items = list(input_items)
     effective_input_items, effective_previous_response_id = resolve_turn_state(
         payload,

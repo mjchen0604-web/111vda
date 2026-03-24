@@ -9,11 +9,10 @@ from flask import Blueprint, Response, current_app, has_app_context, jsonify, ma
 
 from .config import BASE_INSTRUCTIONS, CLAUDE_OPUS_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS, should_use_claude_opus_instructions, should_use_gpt5_codex_instructions
 from .conversation_history import append_conversation_history, replay_conversation_history, response_items_from_chat_message
-from .context_compaction import build_compaction_summary, maybe_compact_input_items
+from .context_compaction import build_compaction_summary
 from .limits import record_rate_limits_from_response
 from .http import build_cors_headers, wrap_sse_stream_with_heartbeat
 from .responses_session import resolve_turn_state, save_response_session, should_retry_without_previous_response
-from .responses_session import should_skip_compaction_for_thread_resume
 from .reasoning import (
     allowed_efforts_for_model,
     apply_reasoning_to_message,
@@ -247,21 +246,14 @@ def _prepare_route_turn_state(
     thread_session: Dict[str, Any] | None,
 ) -> tuple[List[Dict[str, Any]], str | None, Dict[str, Any] | None, List[Dict[str, Any]], List[Dict[str, Any]], str | None, Dict[str, Any]]:
     replayed_input_items, replay_meta = replay_conversation_history(thread_session, input_items)
-    if should_skip_compaction_for_thread_resume(payload, thread_session):
-        next_input_items = list(replayed_input_items)
-        next_instructions = instructions
-        compaction_meta = {
-            "applied": False,
-            "reason": "skipped_for_thread_resume",
-            "original_items": len(replayed_input_items or []),
-            "kept_items": len(replayed_input_items or []),
-        }
-    else:
-        next_input_items, next_instructions, compaction_meta = maybe_compact_input_items(
-            payload,
-            replayed_input_items,
-            instructions,
-        )
+    next_input_items = list(replayed_input_items)
+    next_instructions = instructions
+    compaction_meta = {
+        "applied": False,
+        "reason": "disabled",
+        "original_items": len(replayed_input_items or []),
+        "kept_items": len(replayed_input_items or []),
+    }
     if replay_meta.get("applied"):
         compaction_meta = {**compaction_meta, "history_replay": replay_meta}
     full_input_items = list(next_input_items)
