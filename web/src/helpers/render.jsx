@@ -731,8 +731,10 @@ export function stringToColor(str) {
 }
 
 // 渲染带有模型图标的标签
-export function toPublicModelName(modelName) {
+export function toPublicModelName(modelName, options = {}) {
+  const { enabled = true } = options;
   if (!modelName || typeof modelName !== 'string') return modelName;
+  if (!enabled) return modelName;
   const map = {
     'gpt-5.4-fast-xhigh': 'claude-opus-4-6',
     'gpt-5.4-fast-high': 'claude-opus-4-5',
@@ -753,9 +755,12 @@ export function renderModelTag(modelName, options = {}) {
     shape = 'circle',
     onClick,
     suffixIcon,
+    publicAlias = true,
   } = options;
 
-  const publicModelName = toPublicModelName(modelName);
+  const publicModelName = toPublicModelName(modelName, {
+    enabled: publicAlias,
+  });
   const categories = getModelCategories(i18next.t);
   let icon = null;
 

@@ -232,6 +232,9 @@ function renderBillingTag(record, t) {
 
 function renderModelName(record, copyText, t) {
   let other = getLogOther(record.other);
+  const shouldAliasUpstreamModel =
+    typeof record.model_name === 'string' &&
+    record.model_name.trim().toLowerCase().startsWith('claude-');
   let modelMapped =
     other?.is_model_mapped &&
     other?.upstream_model_name &&
@@ -241,6 +244,7 @@ function renderModelName(record, copyText, t) {
       onClick: (event) => {
         copyText(event, record.model_name).then((r) => {});
       },
+      publicAlias: false,
     });
   } else {
     return (
@@ -258,6 +262,7 @@ function renderModelName(record, copyText, t) {
                       onClick: (event) => {
                         copyText(event, record.model_name).then((r) => {});
                       },
+                      publicAlias: false,
                     })}
                   </div>
                   <div className='flex items-center'>
@@ -270,6 +275,7 @@ function renderModelName(record, copyText, t) {
                           (r) => {},
                         );
                       },
+                      publicAlias: shouldAliasUpstreamModel,
                     })}
                   </div>
                 </Space>
@@ -280,6 +286,7 @@ function renderModelName(record, copyText, t) {
               onClick: (event) => {
                 copyText(event, record.model_name).then((r) => {});
               },
+              publicAlias: false,
               suffixIcon: (
                 <Route
                   style={{ width: '0.9em', height: '0.9em', opacity: 0.75 }}
