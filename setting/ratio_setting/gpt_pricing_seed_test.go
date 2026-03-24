@@ -13,7 +13,7 @@ func TestSeedDefaultGPTPricingUsesMediumForBaseModels(t *testing.T) {
 	}{
 		{model: "gpt-5.4", wantModelRatio: 1.25, wantCacheRatio: 0.1, wantOutputRatio: 6.0},
 		{model: "gpt-5.4-fast", wantModelRatio: 2.5, wantCacheRatio: 0.1, wantOutputRatio: 6.0},
-		{model: "gpt-5.4-mini", wantModelRatio: 0.1, wantCacheRatio: 0.125, wantOutputRatio: 6.25},
+		{model: "gpt-5.4-mini", wantModelRatio: 0.375, wantCacheRatio: 0.1, wantOutputRatio: 6.0},
 		{model: "gpt-5.2", wantModelRatio: 0.875, wantCacheRatio: 0.1, wantOutputRatio: 8.0},
 		{model: "gpt-5.2-codex", wantModelRatio: 0.875, wantCacheRatio: 0.1, wantOutputRatio: 8.0},
 		{model: "gpt-5", wantModelRatio: 0.625, wantCacheRatio: 0.1, wantOutputRatio: 8.0},
@@ -56,7 +56,7 @@ func TestSeedDefaultGPTPricingUsesEffortSpecificOutputRatios(t *testing.T) {
 		{model: "gpt-5.4-high", want: 6.0},
 		{model: "gpt-5.4-fast-low", want: 6.0},
 		{model: "gpt-5.4-fast-xhigh", want: 6.0},
-		{model: "gpt-5.4-mini-high", want: 6.25},
+		{model: "gpt-5.4-mini-high", want: 6.0},
 		{model: "gpt-5.2-low", want: 6.0},
 		{model: "gpt-5.2-xhigh", want: 12.0},
 	}

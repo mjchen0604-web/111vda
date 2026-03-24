@@ -368,8 +368,8 @@ func seedDefaultGPTPricing() {
 	addTieredModelRatio(defaultModelRatio, "gpt-5.4-fast", 2.5, 2.5, 2.5, 2.5)
 	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4-fast", 6.0, 6.0, 6.0, 6.0)
 
-	addTieredModelRatio(defaultModelRatio, "gpt-5.4-mini", 0.1, 0.1, 0.1, 0.1)
-	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4-mini", 6.25, 6.25, 6.25, 6.25)
+	addTieredModelRatio(defaultModelRatio, "gpt-5.4-mini", 0.375, 0.375, 0.375, 0.375)
+	addTieredCompletionRatios(defaultCompletionRatio, "gpt-5.4-mini", 6.0, 6.0, 6.0, 6.0)
 
 	for _, base := range []string{
 		"gpt-5.3-codex",
