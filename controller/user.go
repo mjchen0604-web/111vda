@@ -567,6 +567,11 @@ func UpdateUser(c *gin.Context) {
 	if updatedUser.Password == "$I_LOVE_U" {
 		updatedUser.Password = "" // rollback to what it should be
 	}
+	updatedUser.QuotaResetPeriod = model.NormalizeResetPeriod(updatedUser.QuotaResetPeriod)
+	if updatedUser.QuotaResetPeriod == model.SubscriptionResetCustom && updatedUser.QuotaResetCustomSeconds <= 0 {
+		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
+		return
+	}
 	updatePassword := updatedUser.Password != ""
 	if err := updatedUser.Edit(updatePassword); err != nil {
 		common.ApiError(c, err)

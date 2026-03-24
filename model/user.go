@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -18,39 +19,185 @@ import (
 
 const UserNameMaxLength = 20
 
+func calcUserNextResetTime(base time.Time, user *User) int64 {
+	if user == nil {
+		return 0
+	}
+	period := NormalizeResetPeriod(user.QuotaResetPeriod)
+	if period == SubscriptionResetNever {
+		return 0
+	}
+	var next time.Time
+	switch period {
+	case SubscriptionResetDaily:
+		next = time.Date(base.Year(), base.Month(), base.Day(), 0, 0, 0, 0, base.Location()).AddDate(0, 0, 1)
+	case SubscriptionResetWeekly:
+		weekday := int(base.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		daysUntil := 8 - weekday
+		next = time.Date(base.Year(), base.Month(), base.Day(), 0, 0, 0, 0, base.Location()).AddDate(0, 0, daysUntil)
+	case SubscriptionResetMonthly:
+		next = time.Date(base.Year(), base.Month(), 1, 0, 0, 0, 0, base.Location()).AddDate(0, 1, 0)
+	case SubscriptionResetCustom:
+		if user.QuotaResetCustomSeconds <= 0 {
+			return 0
+		}
+		next = base.Add(time.Duration(user.QuotaResetCustomSeconds) * time.Second)
+	default:
+		return 0
+	}
+	return next.Unix()
+}
+
+func PrepareUserResetFields(user *User, now int64) {
+	if user == nil {
+		return
+	}
+	user.QuotaResetPeriod = NormalizeResetPeriod(user.QuotaResetPeriod)
+	if user.QuotaResetPeriod == SubscriptionResetNever {
+		user.QuotaResetCustomSeconds = 0
+		user.QuotaResetAmount = 0
+		user.LastResetTime = 0
+		user.NextResetTime = 0
+		return
+	}
+	if user.QuotaResetAmount <= 0 {
+		user.QuotaResetAmount = user.Quota
+	}
+	base := time.Unix(now, 0)
+	user.LastResetTime = now
+	user.NextResetTime = calcUserNextResetTime(base, user)
+}
+
+func maybeResetUserQuota(user *User) error {
+	if user == nil {
+		return nil
+	}
+	if NormalizeResetPeriod(user.QuotaResetPeriod) == SubscriptionResetNever || user.NextResetTime <= 0 {
+		return nil
+	}
+	now := common.GetTimestamp()
+	if user.NextResetTime > now {
+		return nil
+	}
+	var updated User
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var fresh User
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", user.Id).First(&fresh).Error; err != nil {
+			return err
+		}
+		if NormalizeResetPeriod(fresh.QuotaResetPeriod) == SubscriptionResetNever || fresh.NextResetTime <= 0 || fresh.NextResetTime > now {
+			updated = fresh
+			return nil
+		}
+		baseUnix := fresh.LastResetTime
+		if baseUnix <= 0 {
+			baseUnix = now
+		}
+		base := time.Unix(baseUnix, 0)
+		next := calcUserNextResetTime(base, &fresh)
+		advanced := false
+		for next > 0 && next <= now {
+			advanced = true
+			base = time.Unix(next, 0)
+			next = calcUserNextResetTime(base, &fresh)
+		}
+		if !advanced {
+			updated = fresh
+			return nil
+		}
+		fresh.Quota = fresh.QuotaResetAmount
+		fresh.UsedQuota = 0
+		fresh.LastResetTime = base.Unix()
+		fresh.NextResetTime = next
+		if err := tx.Model(&fresh).Updates(map[string]any{
+			"quota":           fresh.Quota,
+			"used_quota":      fresh.UsedQuota,
+			"last_reset_time": fresh.LastResetTime,
+			"next_reset_time": fresh.NextResetTime,
+		}).Error; err != nil {
+			return err
+		}
+		updated = fresh
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	*user = updated
+	return updateUserCache(*user)
+}
+
+func ResetDueUsers(limit int) (int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	now := common.GetTimestamp()
+	var ids []int
+	if err := DB.Model(&User{}).
+		Where("quota_reset_period <> ? AND next_reset_time > 0 AND next_reset_time <= ?", SubscriptionResetNever, now).
+		Order("next_reset_time asc").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	resetCount := 0
+	for _, id := range ids {
+		user, err := GetUserById(id, true)
+		if err != nil {
+			return resetCount, err
+		}
+		before := user.LastResetTime
+		if err := maybeResetUserQuota(user); err != nil {
+			return resetCount, err
+		}
+		if user.LastResetTime != before {
+			resetCount++
+		}
+	}
+	return resetCount, nil
+}
+
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id               int            `json:"id"`
-	Username         string         `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password         string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	OriginalPassword string         `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName      string         `json:"display_name" gorm:"index" validate:"max=20"`
-	Role             int            `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status           int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email            string         `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId         string         `json:"github_id" gorm:"column:github_id;index"`
-	DiscordId        string         `json:"discord_id" gorm:"column:discord_id;index"`
-	OidcId           string         `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId         string         `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId       string         `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	AccessToken      *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota            int            `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group            string         `json:"group" gorm:"type:varchar(64);default:'default'"`
-	MaxConcurrency   int            `json:"max_concurrency" gorm:"type:int;default:0"`
-	AffCode          string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota         int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
-	AffHistoryQuota  int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	DeletedAt        gorm.DeletedAt `gorm:"index"`
-	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
-	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
-	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	Id                      int            `json:"id"`
+	Username                string         `json:"username" gorm:"unique;index" validate:"max=20"`
+	Password                string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	OriginalPassword        string         `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
+	DisplayName             string         `json:"display_name" gorm:"index" validate:"max=20"`
+	Role                    int            `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status                  int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email                   string         `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId                string         `json:"github_id" gorm:"column:github_id;index"`
+	DiscordId               string         `json:"discord_id" gorm:"column:discord_id;index"`
+	OidcId                  string         `json:"oidc_id" gorm:"column:oidc_id;index"`
+	WeChatId                string         `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId              string         `json:"telegram_id" gorm:"column:telegram_id;index"`
+	VerificationCode        string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
+	AccessToken             *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	Quota                   int            `json:"quota" gorm:"type:int;default:0"`
+	UsedQuota               int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
+	RequestCount            int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	Group                   string         `json:"group" gorm:"type:varchar(64);default:'default'"`
+	MaxConcurrency          int            `json:"max_concurrency" gorm:"type:int;default:5"`
+	QuotaResetPeriod        string         `json:"quota_reset_period" gorm:"type:varchar(16);default:'never'"`
+	QuotaResetCustomSeconds int64          `json:"quota_reset_custom_seconds" gorm:"type:bigint;default:0"`
+	QuotaResetAmount        int            `json:"quota_reset_amount" gorm:"default:0"`
+	LastResetTime           int64          `json:"last_reset_time" gorm:"bigint;default:0"`
+	NextResetTime           int64          `json:"next_reset_time" gorm:"bigint;default:0"`
+	AffCode                 string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount                int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffQuota                int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
+	AffHistoryQuota         int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
+	InviterId               int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	DeletedAt               gorm.DeletedAt `gorm:"index"`
+	LinuxDOId               string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	Setting                 string         `json:"setting" gorm:"type:text;column:setting"`
+	Remark                  string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
+	StripeCustomer          string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -302,6 +449,9 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	} else {
 		err = DB.Omit("password").First(&user, "id = ?", id).Error
 	}
+	if err == nil {
+		_ = maybeResetUserQuota(&user)
+	}
 	return &user, err
 }
 
@@ -387,6 +537,8 @@ func (user *User) Insert(inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
+	user.MaxConcurrency = common.NormalizeMaxConcurrency(user.MaxConcurrency)
+	PrepareUserResetFields(user, common.GetTimestamp())
 	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
 
@@ -446,6 +598,8 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
+	user.MaxConcurrency = common.NormalizeMaxConcurrency(user.MaxConcurrency)
+	PrepareUserResetFields(user, common.GetTimestamp())
 	user.AffCode = common.GetRandomString(4)
 
 	// 初始化用户设置
@@ -521,13 +675,20 @@ func (user *User) Edit(updatePassword bool) error {
 	}
 
 	newUser := *user
+	newUser.MaxConcurrency = common.NormalizeMaxConcurrency(newUser.MaxConcurrency)
+	PrepareUserResetFields(&newUser, common.GetTimestamp())
 	updates := map[string]interface{}{
-		"username":        newUser.Username,
-		"display_name":    newUser.DisplayName,
-		"group":           newUser.Group,
-		"quota":           newUser.Quota,
-		"max_concurrency": newUser.MaxConcurrency,
-		"remark":          newUser.Remark,
+		"username":                   newUser.Username,
+		"display_name":               newUser.DisplayName,
+		"group":                      newUser.Group,
+		"quota":                      newUser.Quota,
+		"max_concurrency":            newUser.MaxConcurrency,
+		"quota_reset_period":         NormalizeResetPeriod(newUser.QuotaResetPeriod),
+		"quota_reset_custom_seconds": newUser.QuotaResetCustomSeconds,
+		"quota_reset_amount":         newUser.QuotaResetAmount,
+		"last_reset_time":            newUser.LastResetTime,
+		"next_reset_time":            newUser.NextResetTime,
+		"remark":                     newUser.Remark,
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   API,
@@ -85,7 +86,9 @@ const EditUserModal = (props) => {
     linux_do_id: '',
     email: '',
     quota: 0,
-    max_concurrency: 0,
+    max_concurrency: 5,
+    quota_reset_period: 'never',
+    quota_reset_custom_seconds: 0,
     group: 'default',
     remark: '',
   });
@@ -108,6 +111,13 @@ const EditUserModal = (props) => {
     const { success, message, data } = res.data;
     if (success) {
       data.password = '';
+      if (!data.max_concurrency || data.max_concurrency <= 0) {
+        data.max_concurrency = 5;
+      }
+      data.quota_reset_period = data.quota_reset_period || 'never';
+      data.quota_reset_custom_seconds = Number(
+        data.quota_reset_custom_seconds || 0,
+      );
       formApiRef.current?.setValues({ ...getInitValues(), ...data });
     } else {
       showError(message);
@@ -276,6 +286,54 @@ const EditUserModal = (props) => {
                     <div className='flex items-center mb-2'>
                       <Avatar
                         size='small'
+                        color='orange'
+                        className='mr-2 shadow-md'
+                      >
+                        <RefreshCw size={16} />
+                      </Avatar>
+                      <div>
+                        <Text className='text-lg font-medium'>
+                          {t('额度重置')}
+                        </Text>
+                        <div className='text-xs text-gray-600'>
+                          {t('支持周期性重置用户额度')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Row gutter={12}>
+                      <Col span={12}>
+                        <Form.Select
+                          field='quota_reset_period'
+                          label={t('重置周期')}
+                          optionList={[
+                            { label: t('不重置'), value: 'never' },
+                            { label: t('每天'), value: 'daily' },
+                            { label: t('每周'), value: 'weekly' },
+                            { label: t('每月'), value: 'monthly' },
+                            { label: t('自定义秒数'), value: 'custom' },
+                          ]}
+                        />
+                      </Col>
+                      <Col span={12}>
+                        <Form.InputNumber
+                          field='quota_reset_custom_seconds'
+                          label={t('自定义秒数')}
+                          min={0}
+                          precision={0}
+                          disabled={values.quota_reset_period !== 'custom'}
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                    </Row>
+                  </Card>
+                )}
+
+                {userId && (
+                  <Card className='!rounded-2xl shadow-sm border-0'>
+                    <div className='flex items-center mb-2'>
+                      <Avatar
+                        size='small'
                         color='green'
                         className='mr-2 shadow-md'
                       >
@@ -320,10 +378,10 @@ const EditUserModal = (props) => {
                         <Form.InputNumber
                           field='max_concurrency'
                           label={t('个人并发上限')}
-                          placeholder={t('0 表示不限')}
+                          placeholder={t('默认 5')}
                           min={0}
                           precision={0}
-                          extraText={t('限制该用户所有密钥合计可同时处理的请求数')}
+                          extraText={t('限制该用户所有密钥合计可同时处理的请求数，0 也会按默认 5 处理')}
                           style={{ width: '100%' }}
                         />
                       </Col>
