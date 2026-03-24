@@ -32,6 +32,8 @@ type GeneralOpenAIRequest struct {
 	Prompt              any               `json:"prompt,omitempty"`
 	PromptMode          string            `json:"prompt_mode,omitempty"`
 	SystemPrompt        string            `json:"system_prompt,omitempty"`
+	SessionID           string            `json:"session_id,omitempty"`
+	ConversationID      string            `json:"conversation_id,omitempty"`
 	Prefix              any               `json:"prefix,omitempty"`
 	Suffix              any               `json:"suffix,omitempty"`
 	Stream              *bool             `json:"stream,omitempty"`
@@ -73,7 +75,7 @@ type GeneralOpenAIRequest struct {
 	// Whether or not to store the output of this chat completion request for use in our model distillation or evals products.
 	// 是否存储此次请求数据供 OpenAI 用于评估和优化产品
 	// 注意：默认允许透传，可通过 disable_store 禁用；禁用后可能导致 Codex 无法正常使用
-	Store json.RawMessage `json:"store,omitempty"`
+	Store             json.RawMessage `json:"store,omitempty"`
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
 	// Used by OpenAI to cache responses for similar requests to optimize your cache hit rates. Replaces the user field
 	PromptCacheKey       string          `json:"prompt_cache_key,omitempty"`
@@ -824,6 +826,8 @@ type OpenAIResponsesRequest struct {
 	// 在后台运行推理，暂时还不支持依赖的接口
 	// Background         json.RawMessage `json:"background,omitempty"`
 	Conversation       json.RawMessage `json:"conversation,omitempty"`
+	SessionID          string          `json:"session_id,omitempty"`
+	ConversationID     string          `json:"conversation_id,omitempty"`
 	ContextManagement  json.RawMessage `json:"context_management,omitempty"`
 	Instructions       json.RawMessage `json:"instructions,omitempty"`
 	MaxOutputTokens    *uint           `json:"max_output_tokens,omitempty"`
