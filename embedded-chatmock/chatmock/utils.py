@@ -173,11 +173,16 @@ class ManagedAuthUpstream:
     def mark_success(self) -> None:
         self._mark_success()
 
+    def _should_clear_session_binding_on_failure(self, classification: str | None = None) -> bool:
+        normalized = str(classification or "").strip().lower()
+        return normalized in ("account_invalid", "deactivated_workspace")
+
     def mark_failure(self, error_message: str = "", status_code: int | None = None, classification: str | None = None) -> None:
         if self._marked:
             return
         self._marked = True
-        clear_chatgpt_auth_session_binding(self._session_id)
+        if self._should_clear_session_binding_on_failure(classification):
+            clear_chatgpt_auth_session_binding(self._session_id)
         effective_status = status_code
         if not isinstance(effective_status, int) or effective_status < 400:
             effective_status = int(getattr(self._upstream, "status_code", 0) or 0)

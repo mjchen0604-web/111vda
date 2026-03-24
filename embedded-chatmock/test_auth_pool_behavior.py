@@ -158,6 +158,42 @@ class AuthPoolBehaviorTests(unittest.TestCase):
         self.assertIsNotNone(binding)
         self.assertEqual(binding["label"], "acc01/auth.json")
 
+    def test_managed_upstream_transient_failure_keeps_session_binding(self):
+        class DummyUpstream:
+            status_code = 429
+
+            def close(self):
+                return None
+
+        candidate = {
+            "label": "acc01/auth.json",
+            "account_id": "acc01",
+            "source_path": "/tmp/accounts/acc01/auth.json",
+        }
+        bind_chatgpt_auth_session("sess-sticky", candidate)
+        upstream = ManagedAuthUpstream(DummyUpstream(), candidate, session_id="sess-sticky")
+        upstream.mark_failure("rate limited", status_code=429, classification="rate_limited")
+        binding = get_chatgpt_auth_session_binding("sess-sticky")
+        self.assertIsNotNone(binding)
+        self.assertEqual(binding["label"], "acc01/auth.json")
+
+    def test_managed_upstream_account_invalid_clears_session_binding(self):
+        class DummyUpstream:
+            status_code = 401
+
+            def close(self):
+                return None
+
+        candidate = {
+            "label": "acc01/auth.json",
+            "account_id": "acc01",
+            "source_path": "/tmp/accounts/acc01/auth.json",
+        }
+        bind_chatgpt_auth_session("sess-sticky", candidate)
+        upstream = ManagedAuthUpstream(DummyUpstream(), candidate, session_id="sess-sticky")
+        upstream.mark_failure("invalid account", status_code=401, classification="account_invalid")
+        self.assertIsNone(get_chatgpt_auth_session_binding("sess-sticky"))
+
     def test_connection_slot_reused_for_same_session_and_candidate(self):
         candidate = {
             "label": "acc01/auth.json",
