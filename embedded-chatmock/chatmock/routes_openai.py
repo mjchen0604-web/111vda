@@ -7,7 +7,15 @@ from typing import Any, Dict, List
 
 from flask import Blueprint, Response, current_app, has_app_context, jsonify, make_response, request
 
-from .config import BASE_INSTRUCTIONS, CLAUDE_OPUS_INSTRUCTIONS, GPT5_CODEX_INSTRUCTIONS, should_use_claude_opus_instructions, should_use_gpt5_codex_instructions
+from .config import (
+    BASE_INSTRUCTIONS,
+    CLAUDE_OPUS_INSTRUCTIONS,
+    GPT54_INSTRUCTIONS,
+    GPT5_CODEX_INSTRUCTIONS,
+    should_use_claude_opus_instructions,
+    should_use_gpt54_instructions,
+    should_use_gpt5_codex_instructions,
+)
 from .conversation_history import append_conversation_history, replay_conversation_history, response_items_from_chat_message
 from .context_compaction import build_compaction_summary
 from .limits import record_rate_limits_from_response
@@ -175,6 +183,10 @@ def _instructions_for_model(model: str) -> str:
         claude = current_app.config.get("CLAUDE_OPUS_INSTRUCTIONS") or CLAUDE_OPUS_INSTRUCTIONS
         if isinstance(claude, str) and claude.strip():
             return claude
+    if should_use_gpt54_instructions(model):
+        gpt54 = current_app.config.get("GPT54_INSTRUCTIONS") or GPT54_INSTRUCTIONS
+        if isinstance(gpt54, str) and gpt54.strip():
+            return gpt54
     if should_use_gpt5_codex_instructions(model):
         codex = current_app.config.get("GPT5_CODEX_INSTRUCTIONS") or GPT5_CODEX_INSTRUCTIONS
         if isinstance(codex, str) and codex.strip():
