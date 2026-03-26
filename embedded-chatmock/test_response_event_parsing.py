@@ -26,6 +26,13 @@ class DummyUpstream:
     def close(self):
         self.closed = True
 
+    def mark_failure(self, error_message: str = "", status_code: int | None = None, classification: str | None = None):
+        self.marked_failure = {
+            "error_message": error_message,
+            "status_code": status_code,
+            "classification": classification,
+        }
+
 
 def _message_done_events(text: str):
     response = {
@@ -186,6 +193,47 @@ class ResponseEventParsingTests(unittest.TestCase):
             payloads.append(json.loads(text[len("data: ") :].strip()))
 
         self.assertTrue(any("error" in entry for entry in payloads))
+
+    def test_stream_with_partial_text_without_completed_marks_failure(self):
+        upstream = DummyUpstream(
+            [
+                {
+                    "type": "response.output_text.delta",
+                    "delta": "partial answer",
+                    "response": {"id": "resp_partial"},
+                }
+            ]
+        )
+        chunks = list(
+            sse_translate_chat(
+                upstream,
+                "gpt-5.4",
+                0,
+                reasoning_compat="think-tags",
+            )
+        )
+
+        payloads = []
+        for chunk in chunks:
+            text = chunk.decode("utf-8")
+            if not text.startswith("data: ") or "[DONE]" in text:
+                continue
+            payloads.append(json.loads(text[len("data: ") :].strip()))
+
+        content_deltas = [
+            entry["choices"][0]["delta"].get("content", "")
+            for entry in payloads
+            if entry.get("choices")
+        ]
+        self.assertIn("partial answer", "".join(content_deltas))
+        self.assertTrue(
+            any(
+                entry.get("choices", [{}])[0].get("finish_reason") == "stop"
+                for entry in payloads
+                if entry.get("choices")
+            )
+        )
+        self.assertTrue(hasattr(upstream, "marked_failure"))
 
     def test_nonstream_keeps_cached_usage_fields(self):
         upstream = DummyUpstream(_message_done_events_with_usage("cached usage"))
