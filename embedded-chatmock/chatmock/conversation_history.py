@@ -13,6 +13,7 @@ _HISTORY: Dict[str, Dict[str, Any]] = {}
 _MAX_SESSIONS = 4096
 _DEFAULT_TTL_SECONDS = 1800
 _DEFAULT_MAX_ITEMS = 96
+_VISIBLE_MESSAGE_PART_TYPES = {"input_text", "output_text", "input_image", "input_file", "input_audio"}
 
 
 def _ttl_seconds() -> int:
@@ -41,6 +42,48 @@ def _serialize_input_items(input_items: List[Dict[str, Any]]) -> List[str]:
         except Exception:
             out.append(str(item))
     return out
+
+
+def _sanitize_message_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
+    role = item.get("role")
+    if role not in ("user", "assistant"):
+        return None
+    content = item.get("content")
+    if not isinstance(content, list):
+        return None
+
+    sanitized_content: List[Dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = str(part.get("type") or "").strip()
+        if part_type not in _VISIBLE_MESSAGE_PART_TYPES:
+            continue
+        sanitized_content.append(copy.deepcopy(part))
+
+    if not sanitized_content:
+        return None
+    return {
+        "type": "message",
+        "role": role,
+        "content": sanitized_content,
+    }
+
+
+def _sanitize_history_items(items: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
+    sanitized: List[Dict[str, Any]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type") or "").strip()
+        if item_type == "message":
+            sanitized_item = _sanitize_message_item(item)
+            if sanitized_item is not None:
+                sanitized.append(sanitized_item)
+            continue
+        if item_type in ("function_call", "function_call_output", "reasoning"):
+            continue
+    return sanitized
 
 
 def _prune_history(now: float | None = None) -> None:
@@ -81,7 +124,10 @@ def get_conversation_history(session_key: str | None) -> List[Dict[str, Any]]:
         if not isinstance(record, dict):
             return []
         record["updated_at"] = time.time()
-        return copy.deepcopy(record.get("items") or [])
+        sanitized_items = _sanitize_history_items(record.get("items") or [])
+        if sanitized_items != (record.get("items") or []):
+            record["items"] = copy.deepcopy(sanitized_items)
+        return copy.deepcopy(sanitized_items)
 
 
 def clear_conversation_history(session_key: str | None) -> None:
@@ -121,7 +167,7 @@ def replay_conversation_history(
         meta["reason"] = "no_history"
         return list(current_input_items or []), meta
 
-    current_items = list(current_input_items or [])
+    current_items = _sanitize_history_items(list(current_input_items or []))
     if not current_items:
         meta["reason"] = "empty_current"
         return list(history_items), meta
@@ -161,13 +207,13 @@ def append_conversation_history(
     session_key = session_key_from_thread_session(thread_session)
     if not session_key:
         return
-    new_items = list(request_items or [])
+    new_items = _sanitize_history_items(list(request_items or []))
     if isinstance(response_items, list) and response_items:
-        new_items.extend(copy.deepcopy(response_items))
+        new_items.extend(_sanitize_history_items(copy.deepcopy(response_items)))
 
     with _LOCK:
         _prune_history()
-        existing_items = copy.deepcopy((_HISTORY.get(session_key) or {}).get("items") or [])
+        existing_items = _sanitize_history_items(copy.deepcopy((_HISTORY.get(session_key) or {}).get("items") or []))
         overlap = _max_overlap(existing_items, new_items)
         merged = list(existing_items)
         if overlap > 0:
@@ -190,10 +236,10 @@ def response_items_from_response_obj(response_obj: Dict[str, Any] | None) -> Lis
     for item in output:
         if not isinstance(item, dict):
             continue
-        if item.get("type") == "reasoning":
+        if item.get("type") in ("reasoning", "function_call", "function_call_output"):
             continue
         reusable.append(copy.deepcopy(item))
-    return reusable
+    return _sanitize_history_items(reusable)
 
 
 def response_items_from_chat_message(message: Dict[str, Any] | None) -> List[Dict[str, Any]]:
@@ -201,7 +247,7 @@ def response_items_from_chat_message(message: Dict[str, Any] | None) -> List[Dic
         return []
     from .utils import convert_chat_messages_to_responses_input
 
-    return convert_chat_messages_to_responses_input([message])
+    return _sanitize_history_items(convert_chat_messages_to_responses_input([message]))
 
 
 def response_items_from_anthropic_message(message_obj: Dict[str, Any] | None) -> List[Dict[str, Any]]:
@@ -221,18 +267,6 @@ def response_items_from_anthropic_message(message_obj: Dict[str, Any] | None) ->
             text = block.get("text")
             if isinstance(text, str) and text:
                 text_parts.append({"type": "output_text", "text": text})
-        elif block_type == "tool_use":
-            tool_input = block.get("input")
-            arguments = tool_input if isinstance(tool_input, str) else json.dumps(tool_input or {}, ensure_ascii=False)
-            items.append(
-                {
-                    "type": "function_call",
-                    "name": block.get("name") or "",
-                    "arguments": arguments,
-                    "call_id": block.get("id") or "",
-                }
-            )
-
     if text_parts:
         items.insert(
             0,
@@ -242,4 +276,4 @@ def response_items_from_anthropic_message(message_obj: Dict[str, Any] | None) ->
                 "content": text_parts,
             },
         )
-    return items
+    return _sanitize_history_items(items)
