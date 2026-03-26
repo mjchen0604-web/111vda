@@ -63,6 +63,53 @@ def restore_reserved_tool_name(name: Any) -> Any:
     return normalized[len("tool_"):]
 
 
+def _looks_like_tool_protocol_leak(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "to=functions.",
+            "commentary to=functions.",
+            '"command":',
+            '"workdir":',
+            '"timeout_ms":',
+            '"justification":',
+        )
+    )
+
+
+def _strip_tool_protocol_tail(text: str) -> str:
+    if not isinstance(text, str) or not text:
+        return text
+    lowered = text.lower()
+    cut_positions = []
+    for marker in (
+        "\nto=functions.",
+        " to=functions.",
+        "\ncommentary to=functions.",
+        " commentary to=functions.",
+        '\n{"command":',
+        ' {"command":',
+    ):
+        idx = lowered.find(marker)
+        if idx != -1:
+            cut_positions.append(idx)
+    if not cut_positions:
+        return text
+    return text[: min(cut_positions)].rstrip()
+
+
+def _sanitize_assistant_text_for_history(text: Any) -> str:
+    if not isinstance(text, str):
+        return ""
+    cleaned = _strip_tool_protocol_tail(text)
+    if _looks_like_tool_protocol_leak(cleaned):
+        return ""
+    return cleaned
+
+
 def extract_response_output_text(item: Any) -> str:
     if not isinstance(item, dict):
         return ""
@@ -544,6 +591,8 @@ def convert_chat_messages_to_responses_input(messages: List[Dict[str, Any]]) -> 
                 ptype = part.get("type")
                 if ptype == "text":
                     text = part.get("text") or part.get("content") or ""
+                    if role == "assistant":
+                        text = _sanitize_assistant_text_for_history(text)
                     if isinstance(text, str) and text:
                         kind = "output_text" if role == "assistant" else "input_text"
                         content_items.append({"type": kind, "text": text})
@@ -553,8 +602,11 @@ def convert_chat_messages_to_responses_input(messages: List[Dict[str, Any]]) -> 
                     if isinstance(url, str) and url:
                         content_items.append({"type": "input_image", "image_url": _normalize_image_data_url(url)})
         elif isinstance(content, str) and content:
+            if role == "assistant":
+                content = _sanitize_assistant_text_for_history(content)
             kind = "output_text" if role == "assistant" else "input_text"
-            content_items.append({"type": kind, "text": content})
+            if content:
+                content_items.append({"type": kind, "text": content})
 
         if not content_items:
             continue
