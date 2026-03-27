@@ -84,6 +84,42 @@ class DummyFailedUpstream:
         return None
 
 
+class DummyPartialStreamUpstream:
+    status_code = 200
+    chatmock_source = "test"
+
+    def __init__(self):
+        self._lines = [
+            (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "response.output_text.delta",
+                        "delta": "partial",
+                        "response": {"id": "resp_partial"},
+                    },
+                    ensure_ascii=False,
+                )
+            ).encode("utf-8")
+        ]
+
+    def iter_lines(self, decode_unicode=False):
+        for line in self._lines:
+            if decode_unicode:
+                yield line.decode("utf-8", errors="ignore")
+            else:
+                yield line
+
+    def close(self):
+        return None
+
+    def mark_success(self):
+        return None
+
+    def mark_failure(self, *args, **kwargs):
+        return None
+
+
 class ResponsesRouteTests(unittest.TestCase):
     def setUp(self):
         clear_thread_session("sess-chain")
@@ -629,6 +665,36 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0]["extra_payload"].get("previous_response_id"), "resp_missing")
         self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
+
+    def test_v1_responses_stream_without_completed_emits_failed_event(self):
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            return DummyPartialStreamUpstream(), None
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": True,
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello"}],
+                        }
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        body = b"".join(resp.response).decode("utf-8", errors="ignore")
+        self.assertIn('"type": "response.output_text.delta"', body)
+        self.assertIn('"type": "response.failed"', body)
+        self.assertIn('"type": "server_error"', body)
 
     def test_v1_responses_shallow_mode_does_not_resume_thread_state(self):
         calls = []

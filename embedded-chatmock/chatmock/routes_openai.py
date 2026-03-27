@@ -721,6 +721,7 @@ def _responses_stream_passthrough(
     while True:
         should_restart = False
         had_visible_output = False
+        saw_completed = False
         try:
             for raw in current_upstream.iter_lines(decode_unicode=False):
                 if not raw:
@@ -768,9 +769,12 @@ def _responses_stream_passthrough(
                         should_restart = True
                         break
                 if kind == "response.completed" and callable(on_completed):
+                    saw_completed = True
                     response_obj = evt.get("response")
                     if isinstance(response_obj, dict):
                         on_completed(response_obj, current_upstream)
+                elif kind == "response.completed":
+                    saw_completed = True
                 sanitized_evt = _sanitize_responses_stream_event(
                     evt,
                     requested_model=requested_model,
@@ -786,6 +790,32 @@ def _responses_stream_passthrough(
                 return
             current_upstream = next_upstream
             continue
+        if not saw_completed:
+            error_info = normalized_error_payload(
+                build_error_info(
+                    source=getattr(current_upstream, "chatmock_source", "upstream"),
+                    phase="stream",
+                    raw_status=int(getattr(current_upstream, "status_code", 502) or 502),
+                    raw_message="stream ended before response.completed",
+                    raw_body={"message": "stream ended before response.completed"},
+                )
+            )
+            if (
+                not retried
+                and not had_visible_output
+                and retry_factory is not None
+                and should_retry_without_previous_response(error_info)
+            ):
+                retried = True
+                next_upstream = retry_factory()
+                if next_upstream is None:
+                    yield f"data: {json.dumps({'type': 'response.failed', 'error': error_info}, ensure_ascii=False)}\n\n".encode("utf-8")
+                    yield b"data: [DONE]\n\n"
+                    return
+                current_upstream = next_upstream
+                continue
+            yield f"data: {json.dumps({'type': 'response.failed', 'error': error_info}, ensure_ascii=False)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
         return
 
 
