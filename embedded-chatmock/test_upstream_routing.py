@@ -53,16 +53,17 @@ class UpstreamRoutingTests(unittest.TestCase):
         self.assertEqual(resolve_upstream_mode("auto", "gpt-5.4-fast-low", None), "chatgpt-backend")
         self.assertEqual(resolve_upstream_mode("auto", "gpt-5.4", "flex"), "chatgpt-backend")
 
-    def test_gpt54_family_uses_codex_instructions(self):
+    def test_gpt54_family_uses_gpt54_instructions(self):
         app = Flask(__name__)
         app.config["BASE_INSTRUCTIONS"] = "base-template"
+        app.config["GPT54_INSTRUCTIONS"] = "gpt54-template"
         app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
         app.config["CLAUDE_OPUS_INSTRUCTIONS"] = "claude-template"
         with app.app_context():
-            self.assertEqual(_instructions_for_model("gpt-5.4"), "codex-template")
-            self.assertEqual(_instructions_for_model("gpt-5.4-fast"), "codex-template")
-            self.assertEqual(_anthropic_instructions_for_model("gpt-5.4-high"), "codex-template")
-            self.assertEqual(_ollama_instructions_for_model("gpt-5.4-fast-xhigh"), "codex-template")
+            self.assertEqual(_instructions_for_model("gpt-5.4"), "gpt54-template")
+            self.assertEqual(_instructions_for_model("gpt-5.4-fast"), "gpt54-template")
+            self.assertEqual(_anthropic_instructions_for_model("gpt-5.4-high"), "gpt54-template")
+            self.assertEqual(_ollama_instructions_for_model("gpt-5.4-fast-xhigh"), "gpt54-template")
             self.assertEqual(_instructions_for_model("gpt-5-codex"), "codex-template")
             self.assertEqual(_instructions_for_model("claude-opus-4-6"), "claude-template")
             self.assertEqual(_anthropic_instructions_for_model("claude-opus-4-5"), "claude-template")
@@ -74,10 +75,11 @@ class UpstreamRoutingTests(unittest.TestCase):
     def test_native_prompt_mode_can_produce_empty_template(self):
         app = Flask(__name__)
         app.config["BASE_INSTRUCTIONS"] = "base-template"
+        app.config["GPT54_INSTRUCTIONS"] = "gpt54-template"
         app.config["GPT5_CODEX_INSTRUCTIONS"] = "codex-template"
         app.config["CLAUDE_OPUS_INSTRUCTIONS"] = "claude-template"
         with app.app_context():
-            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", "gpt-5.4", {}), "codex-template")
+            self.assertEqual(_resolve_bridge_instructions("gpt-5.4", "gpt-5.4", {}), "gpt54-template")
             self.assertEqual(_resolve_bridge_instructions("gpt-5.4", "gpt-5.4", {"prompt_mode": "native"}), "")
             self.assertEqual(_resolve_bridge_instructions("claude-sonnet-4-6", "gpt-5.4", {}), "claude-template")
 
@@ -262,6 +264,15 @@ class UpstreamRoutingTests(unittest.TestCase):
         flattened = _flatten_response_history_items(items, has_previous_response_id=True)
         self.assertEqual(flattened[0]["type"], "function_call")
         self.assertEqual(flattened[1]["type"], "function_call_output")
+
+    def test_flatten_response_history_items_with_previous_response_id_keeps_unpaired_tool_output(self):
+        items = [
+            {"type": "function_call_output", "call_id": "call_123", "output": "search result"},
+        ]
+        flattened = _flatten_response_history_items(items, has_previous_response_id=True)
+        self.assertEqual(len(flattened), 1)
+        self.assertEqual(flattened[0]["type"], "function_call_output")
+        self.assertEqual(flattened[0]["call_id"], "call_123")
 
     def test_undefined_text_detector_matches_cherry_sentinels(self):
         self.assertTrue(_is_undefined_text_value("[undefined]"))

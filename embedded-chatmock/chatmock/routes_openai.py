@@ -54,7 +54,10 @@ from .utils import (
     extract_response_output_text,
     merge_response_text,
     restore_reserved_tool_name,
+    sanitize_client_visible_text,
     sanitize_reserved_tool_name,
+    sanitize_response_output_item,
+    sanitize_response_output_payload,
     sse_translate_chat,
     sse_translate_text,
 )
@@ -257,7 +260,11 @@ def _prepare_route_turn_state(
     *,
     thread_session: Dict[str, Any] | None,
 ) -> tuple[List[Dict[str, Any]], str | None, Dict[str, Any] | None, List[Dict[str, Any]], List[Dict[str, Any]], str | None, Dict[str, Any]]:
-    replayed_input_items, replay_meta = replay_conversation_history(thread_session, input_items)
+    replayed_input_items, replay_meta = replay_conversation_history(
+        thread_session,
+        input_items,
+        keep_structured_tool_items=bool(isinstance(payload, dict) and payload.get("_chatmock_keep_structured_tool_items")),
+    )
     next_input_items = list(replayed_input_items)
     next_instructions = instructions
     compaction_meta = {
@@ -598,9 +605,10 @@ def _sanitize_responses_response_obj(
     requested_service_tier: str | None,
     observed_service_tier: str | None = None,
 ) -> Dict[str, Any]:
+    cleaned_base = sanitize_response_output_payload(response_obj)
     if not _client_metadata_minimization_enabled():
-        return response_obj
-    cleaned = _strip_client_visible_metadata(response_obj)
+        return cleaned_base if isinstance(cleaned_base, dict) else response_obj
+    cleaned = _strip_client_visible_metadata(cleaned_base)
     if not isinstance(cleaned, dict):
         return response_obj
     presented_model = _presented_client_model(requested_model, cleaned.get("model"))
@@ -616,9 +624,24 @@ def _sanitize_responses_stream_event(
     requested_service_tier: str | None,
     metadata_minimization_enabled: bool,
 ) -> Dict[str, Any]:
+    cleaned_event = dict(evt) if isinstance(evt, dict) else evt
+    if isinstance(cleaned_event, dict):
+        if isinstance(cleaned_event.get("delta"), str):
+            cleaned_event["delta"] = sanitize_client_visible_text(cleaned_event.get("delta"))
+        if isinstance(cleaned_event.get("text"), str):
+            cleaned_event["text"] = sanitize_client_visible_text(cleaned_event.get("text"))
+        if isinstance(cleaned_event.get("part"), dict):
+            part = dict(cleaned_event.get("part") or {})
+            if isinstance(part.get("text"), str):
+                part["text"] = sanitize_client_visible_text(part.get("text"))
+            cleaned_event["part"] = part
+        if isinstance(cleaned_event.get("item"), dict):
+            cleaned_event["item"] = sanitize_response_output_item(cleaned_event.get("item"))
+        if isinstance(cleaned_event.get("response"), dict):
+            cleaned_event["response"] = sanitize_response_output_payload(cleaned_event.get("response"))
     if not metadata_minimization_enabled:
-        return evt
-    cleaned = _strip_client_visible_metadata(evt)
+        return cleaned_event if isinstance(cleaned_event, dict) else evt
+    cleaned = _strip_client_visible_metadata(cleaned_event)
     if isinstance(cleaned, dict) and isinstance(cleaned.get("response"), dict):
         presented_model = _presented_client_model(
             requested_model,
@@ -666,12 +689,12 @@ def _consume_responses_nonstream(
             if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("service_tier"), str):
                 observed_service_tier = evt["response"].get("service_tier") or observed_service_tier
             if kind == "response.output_text.delta":
-                full_text += evt.get("delta") or ""
+                full_text += sanitize_client_visible_text(evt.get("delta") or "")
             elif kind == "response.output_text.done":
-                full_text, _ = merge_response_text(full_text, evt.get("text") or "")
+                full_text, _ = merge_response_text(full_text, sanitize_client_visible_text(evt.get("text") or ""))
             elif kind == "response.content_part.done":
                 part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
-                full_text, _ = merge_response_text(full_text, part.get("text") or "")
+                full_text, _ = merge_response_text(full_text, sanitize_client_visible_text(part.get("text") or ""))
             elif kind == "response.output_item.done":
                 item = evt.get("item") or {}
                 full_text, _ = merge_response_text(full_text, extract_response_output_text(item))
@@ -863,16 +886,16 @@ def _consume_chat_completion_nonstream(
             if isinstance(evt.get("response"), dict) and isinstance(evt["response"].get("service_tier"), str):
                 observed_service_tier = evt["response"].get("service_tier") or observed_service_tier
             if kind == "response.output_text.delta":
-                full_text += evt.get("delta") or ""
+                full_text += sanitize_client_visible_text(evt.get("delta") or "")
             elif kind == "response.output_text.done":
-                full_text, _ = merge_response_text(full_text, evt.get("text") or "")
+                full_text, _ = merge_response_text(full_text, sanitize_client_visible_text(evt.get("text") or ""))
             elif kind == "response.reasoning_summary_text.delta":
                 reasoning_summary_text += evt.get("delta") or ""
             elif kind == "response.reasoning_text.delta":
                 reasoning_full_text += evt.get("delta") or ""
             elif kind == "response.content_part.done":
                 part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
-                full_text, _ = merge_response_text(full_text, part.get("text") or "")
+                full_text, _ = merge_response_text(full_text, sanitize_client_visible_text(part.get("text") or ""))
             elif kind == "response.output_item.done":
                 item = evt.get("item") or {}
                 if isinstance(item, dict) and item.get("type") == "function_call":
@@ -1001,12 +1024,12 @@ def _consume_text_completion_nonstream(
                 usage_obj = to_chat_usage(mu)
             kind = evt.get("type")
             if kind == "response.output_text.delta":
-                full_text += evt.get("delta") or ""
+                full_text += sanitize_client_visible_text(evt.get("delta") or "")
             elif kind == "response.output_text.done":
-                full_text, _ = merge_response_text(full_text, evt.get("text") or "")
+                full_text, _ = merge_response_text(full_text, sanitize_client_visible_text(evt.get("text") or ""))
             elif kind == "response.content_part.done":
                 part = evt.get("part") if isinstance(evt.get("part"), dict) else {}
-                full_text, _ = merge_response_text(full_text, part.get("text") or "")
+                full_text, _ = merge_response_text(full_text, sanitize_client_visible_text(part.get("text") or ""))
             elif kind == "response.output_item.done":
                 item = evt.get("item") or {}
                 full_text, _ = merge_response_text(full_text, extract_response_output_text(item))
@@ -1078,6 +1101,11 @@ def responses() -> Response:
             _log_json("OUT POST /v1/responses", err)
         return jsonify(err), 400
 
+    payload["_chatmock_keep_structured_tool_items"] = True
+    if payload.get("prefer_server_resume") is None:
+        payload["_chatmock_prefer_server_resume"] = True
+    else:
+        payload["_chatmock_prefer_server_resume"] = bool(payload.get("prefer_server_resume"))
     requested_model = payload.get("model")
     model = normalize_model_name(requested_model, current_app.config.get("DEBUG_MODEL"))
     input_items, input_err = _normalize_responses_input(payload)

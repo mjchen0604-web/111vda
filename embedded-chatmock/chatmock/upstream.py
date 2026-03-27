@@ -156,7 +156,7 @@ def _stringify_function_output(value: Any) -> str:
         return str(value)
 
 
-def _sanitize_orphan_function_call_outputs(input_items: Any) -> Any:
+def _sanitize_orphan_function_call_outputs(input_items: Any, *, allow_unpaired_outputs: bool = False) -> Any:
     if not isinstance(input_items, list):
         return input_items
     sanitized: List[Dict[str, Any]] = []
@@ -174,7 +174,7 @@ def _sanitize_orphan_function_call_outputs(input_items: Any) -> Any:
             continue
         if item_type == "function_call_output":
             call_id = str(item.get("call_id") or "").strip()
-            if call_id and call_id in seen_call_ids:
+            if call_id and (call_id in seen_call_ids or allow_unpaired_outputs):
                 sanitized.append(item)
                 continue
             output_text = _stringify_function_output(item.get("output"))
@@ -195,7 +195,7 @@ def _flatten_response_history_items(input_items: Any, *, has_previous_response_i
     if not isinstance(input_items, list):
         return input_items
     if has_previous_response_id:
-        return _sanitize_orphan_function_call_outputs(input_items)
+        return _sanitize_orphan_function_call_outputs(input_items, allow_unpaired_outputs=True)
 
     flattened: List[Dict[str, Any]] = []
     for item in input_items:

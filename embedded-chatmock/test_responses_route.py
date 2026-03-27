@@ -120,6 +120,63 @@ class DummyPartialStreamUpstream:
         return None
 
 
+class DummyToolLeakStreamUpstream:
+    status_code = 200
+    chatmock_source = "test"
+
+    def __init__(self):
+        self._lines = [
+            (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "response.output_text.delta",
+                        "delta": (
+                            '我先再试一次最小写入探针，确认当前这轮策略有没有变化。 commentary '
+                            'to=functions.shell_command {"command":"dir","workdir":"C:\\\\Users\\\\Mjaga\\\\Desktop"}'
+                        ),
+                        "response": {"id": "resp_leak_stream"},
+                    },
+                    ensure_ascii=False,
+                )
+            ).encode("utf-8"),
+            (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp_leak_stream",
+                            "object": "response",
+                            "created_at": 123,
+                            "status": "completed",
+                            "model": "gpt-5.4",
+                            "output": [],
+                            "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            ).encode("utf-8"),
+        ]
+
+    def iter_lines(self, decode_unicode=False):
+        for line in self._lines:
+            if decode_unicode:
+                yield line.decode("utf-8", errors="ignore")
+            else:
+                yield line
+
+    def close(self):
+        return None
+
+    def mark_success(self):
+        return None
+
+    def mark_failure(self, *args, **kwargs):
+        return None
+
+
 class ResponsesRouteTests(unittest.TestCase):
     def setUp(self):
         clear_thread_session("sess-chain")
@@ -440,7 +497,7 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(body["object"], "response.compaction")
         self.assertEqual(body["output"][0]["type"], "summary_text")
 
-    def test_v1_responses_keeps_full_history_by_default(self):
+    def test_v1_responses_prefers_saved_thread_resume_by_default(self):
         calls = []
 
         def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
@@ -516,10 +573,11 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(len(calls), 2)
-        self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
-        self.assertEqual(len(calls[1]["input_items"]), 3)
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_first")
+        self.assertEqual(len(calls[1]["input_items"]), 1)
+        self.assertEqual(calls[1]["input_items"][0]["content"][0]["text"], "new turn")
 
-    def test_v1_responses_replays_history_when_client_only_sends_current_turn(self):
+    def test_v1_responses_uses_saved_thread_resume_when_client_only_sends_current_turn(self):
         calls = []
 
         def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
@@ -591,11 +649,185 @@ class ResponsesRouteTests(unittest.TestCase):
 
         self.assertEqual(second.status_code, 200)
         self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_hist_1")
+        self.assertEqual(len(calls[1]["input_items"]), 1)
+        self.assertEqual(calls[1]["input_items"][0]["content"][0]["text"], "what was the secret?")
+
+    def test_v1_responses_replays_structured_tool_history_for_followup_turn(self):
+        calls = []
+
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            calls.append(
+                {
+                    "model": model,
+                    "input_items": input_items,
+                    "extra_payload": dict(extra_payload or {}),
+                }
+            )
+            if len(calls) == 1:
+                output = [
+                    {
+                        "type": "function_call",
+                        "id": "fc_hist_1",
+                        "call_id": "call_hist_1",
+                        "name": "builtin_web_search",
+                        "arguments": "{\"q\":\"weather\"}",
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_hist_1",
+                        "output": [{"type": "input_text", "text": "sunny"}],
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "已查询天气"}],
+                    },
+                ]
+                response_id = "resp_tool_hist_1"
+            else:
+                output = [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "继续处理"}],
+                    }
+                ]
+                response_id = "resp_tool_hist_2"
+            return (
+                DummyUpstream(
+                    {
+                        "id": response_id,
+                        "object": "response",
+                        "created_at": 123,
+                        "status": "completed",
+                        "model": model,
+                        "output": output,
+                        "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                    }
+                ),
+                None,
+            )
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-history",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "先查天气"}],
+                        }
+                    ],
+                },
+            )
+            second = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-history",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "然后继续"}],
+                        }
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        second_items = calls[1]["input_items"]
+        self.assertEqual(calls[1]["extra_payload"].get("previous_response_id"), "resp_tool_hist_1")
+        self.assertEqual(len(second_items), 1)
+        self.assertEqual(second_items[0]["type"], "message")
+        self.assertEqual(second_items[0]["content"][0]["text"], "然后继续")
+
+    def test_v1_responses_can_fallback_to_full_replay_when_server_resume_disabled(self):
+        calls = []
+
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            calls.append(
+                {
+                    "model": model,
+                    "input_items": input_items,
+                    "extra_payload": dict(extra_payload or {}),
+                }
+            )
+            response_id = "resp_replay_1" if len(calls) == 1 else "resp_replay_2"
+            output = [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "remembered"}],
+                }
+            ]
+            return (
+                DummyUpstream(
+                    {
+                        "id": response_id,
+                        "object": "response",
+                        "created_at": 123,
+                        "status": "completed",
+                        "model": model,
+                        "output": output,
+                        "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                    }
+                ),
+                None,
+            )
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-history",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "remember secret"}],
+                        }
+                    ],
+                },
+            )
+            second = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "session_id": "sess-history",
+                    "prefer_server_resume": False,
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "what was the secret?"}],
+                        }
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(calls), 2)
         self.assertNotIn("previous_response_id", calls[1]["extra_payload"])
         self.assertEqual(len(calls[1]["input_items"]), 3)
-        self.assertEqual(calls[1]["input_items"][0]["content"][0]["text"], "remember secret")
-        self.assertEqual(calls[1]["input_items"][1]["content"][0]["text"], "remembered")
-        self.assertEqual(calls[1]["input_items"][2]["content"][0]["text"], "what was the secret?")
 
     def test_thread_resume_skips_compaction(self):
         payload = {
@@ -695,6 +927,100 @@ class ResponsesRouteTests(unittest.TestCase):
         self.assertIn('"type": "response.output_text.delta"', body)
         self.assertIn('"type": "response.failed"', body)
         self.assertIn('"type": "server_error"', body)
+
+    def test_v1_responses_stream_strips_tool_protocol_leak_from_client_output(self):
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            return DummyToolLeakStreamUpstream(), None
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": True,
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello"}],
+                        }
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        body = b"".join(resp.response).decode("utf-8", errors="ignore")
+        self.assertNotIn("to=functions.shell_command", body)
+        self.assertNotIn('"command":"dir"', body)
+        self.assertIn('"type": "response.output_text.delta"', body)
+        self.assertIn("我先再试一次最小写入探针", body)
+
+    def test_v1_responses_nonstream_strips_tool_protocol_leak_from_completed_payload(self):
+        def stub(model, input_items, *, instructions=None, extra_payload=None, **kwargs):
+            return (
+                DummyUpstream(
+                    {
+                        "id": "resp_leak_nonstream",
+                        "object": "response",
+                        "created_at": 123,
+                        "status": "completed",
+                        "model": model,
+                        "output_text": (
+                            '正常前缀 commentary to=functions.shell_command '
+                            '{"command":"dir","workdir":"C:\\\\Users\\\\Mjaga\\\\Desktop"}'
+                        ),
+                        "output": [
+                            {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": (
+                                            '正常前缀 commentary to=functions.shell_command '
+                                            '{"command":"dir","workdir":"C:\\\\Users\\\\Mjaga\\\\Desktop"}'
+                                        ),
+                                    }
+                                ],
+                            }
+                        ],
+                        "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                    }
+                ),
+                None,
+            )
+
+        original = routes_openai.start_upstream_request
+        routes_openai.start_upstream_request = stub
+        try:
+            resp = self.client.post(
+                "/v1/responses",
+                json={
+                    "model": "gpt-5.4",
+                    "stream": False,
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello"}],
+                        }
+                    ],
+                },
+            )
+        finally:
+            routes_openai.start_upstream_request = original
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body.get("output_text"), "正常前缀")
+        output = body.get("output") or []
+        text = (((output[0] or {}).get("content") or [])[0] or {}).get("text")
+        self.assertEqual(text, "正常前缀")
+        self.assertNotIn("to=functions.shell_command", json.dumps(body, ensure_ascii=False))
 
     def test_v1_responses_shallow_mode_does_not_resume_thread_state(self):
         calls = []

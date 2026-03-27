@@ -67,15 +67,15 @@ def _looks_like_tool_protocol_leak(text: str) -> bool:
     if not isinstance(text, str):
         return False
     lowered = text.lower()
-    return any(
+    if "to=functions." in lowered or "commentary to=functions." in lowered:
+        return True
+    return '"command":' in lowered and any(
         marker in lowered
         for marker in (
-            "to=functions.",
-            "commentary to=functions.",
-            '"command":',
             '"workdir":',
             '"timeout_ms":',
             '"justification":',
+            '"sandbox_permissions":',
         )
     )
 
@@ -90,11 +90,24 @@ def _strip_tool_protocol_tail(text: str) -> str:
         " to=functions.",
         "\ncommentary to=functions.",
         " commentary to=functions.",
-        '\n{"command":',
-        ' {"command":',
     ):
         idx = lowered.find(marker)
         if idx != -1:
+            cut_positions.append(idx)
+    for marker in ('\n{"command":', ' {"command":'):
+        idx = lowered.find(marker)
+        if idx == -1:
+            continue
+        tail = lowered[idx:]
+        if any(
+            extra_marker in tail
+            for extra_marker in (
+                '"workdir":',
+                '"timeout_ms":',
+                '"justification":',
+                '"sandbox_permissions":',
+            )
+        ):
             cut_positions.append(idx)
     if not cut_positions:
         return text
@@ -110,13 +123,70 @@ def _sanitize_assistant_text_for_history(text: Any) -> str:
     return cleaned
 
 
+def sanitize_client_visible_text(text: Any) -> str:
+    if not isinstance(text, str):
+        return ""
+    cleaned = _strip_tool_protocol_tail(text)
+    if _looks_like_tool_protocol_leak(cleaned):
+        return ""
+    return cleaned
+
+
+def sanitize_response_output_item(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+
+    sanitized = dict(item)
+    direct_text = sanitized.get("output_text")
+    if isinstance(direct_text, str):
+        sanitized["output_text"] = sanitize_client_visible_text(direct_text)
+
+    content = sanitized.get("content")
+    if isinstance(content, list):
+        sanitized_content: List[Any] = []
+        for part in content:
+            if not isinstance(part, dict):
+                sanitized_content.append(part)
+                continue
+            part_copy = dict(part)
+            part_type = part_copy.get("type")
+            if part_type in ("output_text", "text", "summary_text"):
+                text = part_copy.get("text")
+                if isinstance(text, str):
+                    part_copy["text"] = sanitize_client_visible_text(text)
+            sanitized_content.append(part_copy)
+        sanitized["content"] = sanitized_content
+
+    output = sanitized.get("output")
+    if isinstance(output, list):
+        sanitized["output"] = [sanitize_response_output_item(output_item) for output_item in output]
+
+    return sanitized
+
+
+def sanitize_response_output_payload(response_obj: Any) -> Any:
+    if not isinstance(response_obj, dict):
+        return response_obj
+
+    sanitized = dict(response_obj)
+    direct_text = sanitized.get("output_text")
+    if isinstance(direct_text, str):
+        sanitized["output_text"] = sanitize_client_visible_text(direct_text)
+
+    output = sanitized.get("output")
+    if isinstance(output, list):
+        sanitized["output"] = [sanitize_response_output_item(output_item) for output_item in output]
+
+    return sanitized
+
+
 def extract_response_output_text(item: Any) -> str:
     if not isinstance(item, dict):
         return ""
 
     direct_text = item.get("output_text")
     if isinstance(direct_text, str) and direct_text:
-        return direct_text
+        return sanitize_client_visible_text(direct_text)
 
     parts: List[str] = []
     content = item.get("content")
@@ -128,9 +198,9 @@ def extract_response_output_text(item: Any) -> str:
             if part_type in ("output_text", "text", "summary_text"):
                 text = part.get("text")
                 if isinstance(text, str) and text:
-                    parts.append(text)
+                    parts.append(sanitize_client_visible_text(text))
     if parts:
-        return "".join(parts)
+        return sanitize_client_visible_text("".join(parts))
 
     output = item.get("output")
     if isinstance(output, list):
@@ -139,7 +209,7 @@ def extract_response_output_text(item: Any) -> str:
             text = extract_response_output_text(output_item)
             if text:
                 nested_parts.append(text)
-        return "".join(nested_parts)
+        return sanitize_client_visible_text("".join(nested_parts))
 
     return ""
 

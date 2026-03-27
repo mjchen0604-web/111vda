@@ -44,19 +44,53 @@ def resolve_turn_state(
     thread_session: Dict[str, Any] | None,
 ) -> Tuple[List[Dict[str, Any]], str | None]:
     explicit_thread_id = explicit_previous_response_id(payload)
+    thread_id = (
+        str((thread_session or {}).get("thread_id") or "").strip()
+        if isinstance(thread_session, dict)
+        else ""
+    )
+    turn_input_items = (
+        list((thread_session or {}).get("turn_input_items") or [])
+        if isinstance(thread_session, dict)
+        else []
+    )
 
     if shallow_graft_mode_enabled() and explicit_thread_id is None:
         return list(full_input_items), None
 
-    return list(full_input_items), explicit_thread_id
+    prefer_server_resume = payload.get("_chatmock_prefer_server_resume")
+    if prefer_server_resume is None:
+        prefer_server_resume = False
+
+    def _trim_leading_assistant_echo(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        trimmed = list(items or [])
+        while len(trimmed) > 1:
+            head = trimmed[0] if isinstance(trimmed[0], dict) else {}
+            if str(head.get("type") or "").strip() != "message":
+                break
+            if str(head.get("role") or "").strip() != "assistant":
+                break
+            trimmed = trimmed[1:]
+        return trimmed
+
+    if explicit_thread_id:
+        return _trim_leading_assistant_echo(turn_input_items or full_input_items), explicit_thread_id
+
+    if prefer_server_resume and thread_id:
+        return _trim_leading_assistant_echo(turn_input_items or full_input_items), thread_id
+
+    return list(full_input_items), None
 
 
 def should_skip_compaction_for_thread_resume(
     payload: Dict[str, Any],
     thread_session: Dict[str, Any] | None,
 ) -> bool:
-    _ = thread_session
-    return explicit_previous_response_id(payload) is not None
+    if explicit_previous_response_id(payload) is not None:
+        return True
+    if not isinstance(thread_session, dict):
+        return False
+    return bool(payload.get("_chatmock_prefer_server_resume") and thread_session.get("thread_id"))
 
 
 def save_response_session(
@@ -87,5 +121,9 @@ def save_response_session(
     append_conversation_history(
         thread_session,
         full_input_items,
-        response_items_from_response_obj(response_obj if isinstance(response_obj, dict) else None),
+        response_items_from_response_obj(
+            response_obj if isinstance(response_obj, dict) else None,
+            keep_structured_tool_items=True,
+        ),
+        keep_structured_tool_items=True,
     )

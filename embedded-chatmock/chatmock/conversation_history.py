@@ -70,7 +70,11 @@ def _sanitize_message_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
     }
 
 
-def _sanitize_history_items(items: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
+def _sanitize_history_items(
+    items: List[Dict[str, Any]] | None,
+    *,
+    keep_structured_tool_items: bool = False,
+) -> List[Dict[str, Any]]:
     sanitized: List[Dict[str, Any]] = []
     for item in items or []:
         if not isinstance(item, dict):
@@ -81,7 +85,11 @@ def _sanitize_history_items(items: List[Dict[str, Any]] | None) -> List[Dict[str
             if sanitized_item is not None:
                 sanitized.append(sanitized_item)
             continue
-        if item_type in ("function_call", "function_call_output", "reasoning"):
+        if item_type in ("function_call", "function_call_output"):
+            if keep_structured_tool_items:
+                sanitized.append(copy.deepcopy(item))
+            continue
+        if item_type == "reasoning":
             continue
     return sanitized
 
@@ -115,19 +123,34 @@ def session_key_from_thread_session(thread_session: Dict[str, Any] | None) -> st
     return session_key.strip()
 
 
-def get_conversation_history(session_key: str | None) -> List[Dict[str, Any]]:
+def _stored_history_items(session_key: str) -> List[Dict[str, Any]]:
+    record = _HISTORY.get(session_key)
+    if not isinstance(record, dict):
+        return []
+    items = record.get("items")
+    if not isinstance(items, list):
+        return []
+    return copy.deepcopy(items)
+
+
+def get_conversation_history(
+    session_key: str | None,
+    *,
+    keep_structured_tool_items: bool = False,
+) -> List[Dict[str, Any]]:
     if not isinstance(session_key, str) or not session_key.strip():
         return []
     with _LOCK:
         _prune_history()
-        record = _HISTORY.get(session_key.strip())
+        normalized_key = session_key.strip()
+        record = _HISTORY.get(normalized_key)
         if not isinstance(record, dict):
             return []
         record["updated_at"] = time.time()
-        sanitized_items = _sanitize_history_items(record.get("items") or [])
-        if sanitized_items != (record.get("items") or []):
-            record["items"] = copy.deepcopy(sanitized_items)
-        return copy.deepcopy(sanitized_items)
+        return _sanitize_history_items(
+            _stored_history_items(normalized_key),
+            keep_structured_tool_items=keep_structured_tool_items,
+        )
 
 
 def clear_conversation_history(session_key: str | None) -> None:
@@ -150,6 +173,8 @@ def _max_overlap(previous_items: List[Dict[str, Any]], current_items: List[Dict[
 def replay_conversation_history(
     thread_session: Dict[str, Any] | None,
     current_input_items: List[Dict[str, Any]],
+    *,
+    keep_structured_tool_items: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     session_key = session_key_from_thread_session(thread_session)
     meta: Dict[str, Any] = {
@@ -161,13 +186,19 @@ def replay_conversation_history(
     if not session_key:
         return list(current_input_items or []), meta
 
-    history_items = get_conversation_history(session_key)
+    history_items = get_conversation_history(
+        session_key,
+        keep_structured_tool_items=keep_structured_tool_items,
+    )
     meta["history_items"] = len(history_items)
     if not history_items:
         meta["reason"] = "no_history"
         return list(current_input_items or []), meta
 
-    current_items = _sanitize_history_items(list(current_input_items or []))
+    current_items = _sanitize_history_items(
+        list(current_input_items or []),
+        keep_structured_tool_items=keep_structured_tool_items,
+    )
     if not current_items:
         meta["reason"] = "empty_current"
         return list(history_items), meta
@@ -203,17 +234,30 @@ def append_conversation_history(
     thread_session: Dict[str, Any] | None,
     request_items: List[Dict[str, Any]],
     response_items: List[Dict[str, Any]] | None,
+    *,
+    keep_structured_tool_items: bool = False,
 ) -> None:
     session_key = session_key_from_thread_session(thread_session)
     if not session_key:
         return
-    new_items = _sanitize_history_items(list(request_items or []))
+    new_items = _sanitize_history_items(
+        list(request_items or []),
+        keep_structured_tool_items=keep_structured_tool_items,
+    )
     if isinstance(response_items, list) and response_items:
-        new_items.extend(_sanitize_history_items(copy.deepcopy(response_items)))
+        new_items.extend(
+            _sanitize_history_items(
+                copy.deepcopy(response_items),
+                keep_structured_tool_items=keep_structured_tool_items,
+            )
+        )
 
     with _LOCK:
         _prune_history()
-        existing_items = _sanitize_history_items(copy.deepcopy((_HISTORY.get(session_key) or {}).get("items") or []))
+        existing_items = _sanitize_history_items(
+            _stored_history_items(session_key),
+            keep_structured_tool_items=True,
+        )
         overlap = _max_overlap(existing_items, new_items)
         merged = list(existing_items)
         if overlap > 0:
@@ -226,7 +270,11 @@ def append_conversation_history(
         }
 
 
-def response_items_from_response_obj(response_obj: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+def response_items_from_response_obj(
+    response_obj: Dict[str, Any] | None,
+    *,
+    keep_structured_tool_items: bool = False,
+) -> List[Dict[str, Any]]:
     if not isinstance(response_obj, dict):
         return []
     output = response_obj.get("output")
@@ -236,10 +284,15 @@ def response_items_from_response_obj(response_obj: Dict[str, Any] | None) -> Lis
     for item in output:
         if not isinstance(item, dict):
             continue
-        if item.get("type") in ("reasoning", "function_call", "function_call_output"):
+        if item.get("type") == "reasoning":
+            continue
+        if item.get("type") in ("function_call", "function_call_output") and not keep_structured_tool_items:
             continue
         reusable.append(copy.deepcopy(item))
-    return _sanitize_history_items(reusable)
+    return _sanitize_history_items(
+        reusable,
+        keep_structured_tool_items=keep_structured_tool_items,
+    )
 
 
 def response_items_from_chat_message(message: Dict[str, Any] | None) -> List[Dict[str, Any]]:
