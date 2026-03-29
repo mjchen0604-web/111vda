@@ -527,12 +527,19 @@ def _start_chatgpt_backend_request(
             preferred_label = str(thread_session.get("candidate_label") or "").strip()
             preferred_source_path = str(thread_session.get("candidate_url") or "").strip()
         
-        # If no preferred_label from thread_session, try to extract from Authorization header
+        # If no preferred_label from thread_session, try to extract from Authorization header.
+        # Only treat the token as an account label if it looks like an auth file path
+        # (e.g. "acc01/auth.json" contains "/"). Regular API keys (sk-...) or opaque tokens
+        # must NOT be used as preferred_label, because claim_chatgpt_auth_candidate returns
+        # None without fallback when preferred_label is set but matches no account label,
+        # which incorrectly causes 401 "No valid ChatGPT account is available."
         if not preferred_label:
             try:
                 auth_header = flask_request.headers.get("Authorization") or ""
                 if auth_header.lower().startswith("bearer "):
-                    preferred_label = auth_header[7:].strip()
+                    token = auth_header[7:].strip()
+                    if token and "/" in token and not token.lower().startswith("sk-"):
+                        preferred_label = token
             except Exception:
                 pass
 
