@@ -1869,6 +1869,11 @@ def mark_chatgpt_auth_result(
             _clear_invalid_auth_candidate(label=label, account_id=str(account_id or "").strip())
             if account_id:
                 _set_account_cooldown(account_id=account_id, until_ts=0.0)
+            # Reset consecutive 401 counter on success
+            with _AUTH_POOL_STATE_LOCK:
+                s = dict(_AUTH_POOL_STATE.get(label) or {})
+                s["consecutive_401"] = 0
+                _AUTH_POOL_STATE[label] = s
             _set_auth_pool_state(
                 label,
                 status="ready",
@@ -1947,8 +1952,34 @@ def handle_chatgpt_candidate_failure(candidate: Dict[str, Any], info: Dict[str, 
         return effective_classification
 
     if effective_classification == "account_invalid":
-        _mark_invalid_auth_candidate(label=label, account_id=account_id)
-        remove_chatgpt_auth_candidate(candidate, reason=raw_message or "Account invalid")
+        # Graduated cooldown instead of instant removal.
+        # Track consecutive 401 failures; only permanently remove after 5+.
+        with _AUTH_POOL_STATE_LOCK:
+            state = dict(_AUTH_POOL_STATE.get(label) or {})
+            consecutive_401 = int(state.get("consecutive_401", 0)) + 1
+            state["consecutive_401"] = consecutive_401
+            _AUTH_POOL_STATE[label] = state
+
+        if consecutive_401 >= 5:
+            # Truly dead account: remove after 5 consecutive 401s
+            _mark_invalid_auth_candidate(label=label, account_id=account_id)
+            remove_chatgpt_auth_candidate(candidate, reason=raw_message or "Account invalid (5+ consecutive 401s)")
+        else:
+            # Graduated cooldown: 5min → 30min → 2hr
+            cooldown_minutes = {1: 5, 2: 30, 3: 120, 4: 120}.get(consecutive_401, 120)
+            cooldown_until = time.time() + cooldown_minutes * 60
+            mark_chatgpt_auth_result(
+                label,
+                success=False,
+                status_code=raw_status,
+                account_id=account_id,
+                error_message=raw_message,
+                classification="account_invalid_cooldown",
+                cooldown_until_ts=cooldown_until,
+                raw_code=raw_code,
+                raw_message=raw_message,
+            )
+            eprint(f"INFO: account {label} got 401 ({consecutive_401}/5), cooldown {cooldown_minutes}min")
         return effective_classification
 
     mark_chatgpt_auth_result(
