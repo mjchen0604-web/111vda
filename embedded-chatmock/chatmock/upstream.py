@@ -347,6 +347,9 @@ def _should_record_candidate_failure_state(error_info: Dict[str, Any] | None = N
     if not isinstance(error_info, dict):
         return False
     classification = classify_error(error_info)
+    # Always record account_invalid even during test requests so 401 accounts get removed
+    if classification == "account_invalid":
+        return True
     if classification not in ("rate_limited", "insufficient_balance"):
         return False
     unlock_ts = extract_retry_after_unlock_ts(error_info)
