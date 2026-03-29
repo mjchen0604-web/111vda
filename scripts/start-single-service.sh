@@ -111,7 +111,7 @@ done
 
 if ! wget -qO- "http://${CHAT_HOST}:${CHAT_PORT}/health" >/dev/null 2>&1; then
   echo "[single-service] embedded chat failed to start on ${CHAT_HOST}:${CHAT_PORT}" >&2
-  exit 1
+  # Do not exit 1, let new-api start anyway so the main application is up
 fi
 
 exec "$NEW_API_BIN"
