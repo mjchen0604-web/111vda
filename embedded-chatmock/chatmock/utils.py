@@ -455,7 +455,18 @@ def _preferred_chatgpt_auth_candidate_for_hint(
             continue
         candidate_label = str(candidate.get("label") or "").strip()
         candidate_source_path = str(candidate.get("source_path") or "").strip()
-        if label and candidate_label == label:
+        candidate_account_id = str(candidate.get("account_id") or "").strip()
+        candidate_access_token = str(candidate.get("access_token") or "").strip()
+        
+        # Check direct matches or matches without 'sk-' prefix padding if used
+        if label and (
+            candidate_label == label or 
+            candidate_account_id == label or 
+            candidate_access_token == label or
+            f"sk-{candidate_label}" == label or
+            f"sk-{candidate_account_id}" == label or
+            f"sk-{candidate_access_token}" == label
+        ):
             return candidate
         if source_path and candidate_source_path == source_path:
             return candidate
@@ -803,7 +814,16 @@ def _refresh_chatgpt_tokens(refresh_token: str, client_id: str) -> Optional[Dict
     }
 
     try:
-        resp = requests.post(OAUTH_TOKEN_URL, json=payload, timeout=30)
+        resp = requests.post(
+            OAUTH_TOKEN_URL, 
+            json=payload, 
+            timeout=30,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+                "Origin": "https://chatgpt.com",
+                "Referer": "https://chatgpt.com/"
+            }
+        )
     except requests.RequestException as exc:
         eprint(f"ERROR: failed to refresh ChatGPT token: {exc}")
         return None
@@ -1558,6 +1578,33 @@ def get_effective_chatgpt_auth_candidates(ensure_fresh: bool = True) -> List[Dic
     return _ordered_candidates_by_strategy(candidates)
 
 
+def _apply_account_cooldown(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter out candidates whose accounts are currently in cooldown or marked invalid."""
+    if not candidates:
+        return candidates
+    now = time.time()
+    active: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        label = str(candidate.get("label") or "").strip()
+        account_id = str(candidate.get("account_id") or "").strip()
+        # Skip candidates marked as invalid
+        if _is_invalid_auth_candidate(label=label, account_id=account_id):
+            continue
+        # Skip candidates in account cooldown
+        if account_id:
+            cooldown_until = _get_account_cooldown(account_id)
+            if cooldown_until > now:
+                continue
+        # Skip candidates in label cooldown
+        if label:
+            cooldown_until = _get_cooldown_until(label)
+            if cooldown_until > now:
+                continue
+        active.append(candidate)
+    # If all are in cooldown, return them anyway (better than returning empty)
+    return active if active else candidates
+
+
 def _ordered_candidates_round_robin(candidates: List[Dict[str, str]]) -> List[Dict[str, str]]:
     if len(candidates) <= 1:
         return candidates
@@ -1682,18 +1729,29 @@ def claim_chatgpt_auth_candidate(
         preferred_label,
         preferred_source_path,
     )
+    
+    # If explicit label is requested but not found, do not fall back to random accounts.
+    if (preferred_label or preferred_source_path) and not sticky_candidate:
+        return None
+
     if not isinstance(sticky_candidate, dict):
         sticky_candidate = _preferred_chatgpt_auth_candidate_for_session(candidates, session_id)
+        
     if isinstance(sticky_candidate, dict):
         sticky_label = str(sticky_candidate.get("label") or "").strip()
         prioritized: List[Dict[str, Any]] = [sticky_candidate]
-        tail_candidates: List[Dict[str, Any]] = []
-        for candidate in candidates:
-            candidate_label = str(candidate.get("label") or "").strip()
-            if sticky_label and candidate_label == sticky_label:
-                continue
-            tail_candidates.append(candidate)
-        prioritized.extend(_sort_candidates_by_codex_pressure(tail_candidates))
+        
+        # If preferred_label was explicitly requested, DO NOT append tail candidates.
+        # We only want to use the exact requested account.
+        if not (preferred_label or preferred_source_path):
+            tail_candidates: List[Dict[str, Any]] = []
+            for candidate in candidates:
+                candidate_label = str(candidate.get("label") or "").strip()
+                if sticky_label and candidate_label == sticky_label:
+                    continue
+                tail_candidates.append(candidate)
+            prioritized.extend(_sort_candidates_by_codex_pressure(tail_candidates))
+            
         candidates = prioritized
     else:
         candidates = _sort_candidates_by_codex_pressure(candidates)
@@ -2248,6 +2306,12 @@ def _probe_chatgpt_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
         "chatgpt-account-id": account_id,
         "OpenAI-Beta": "responses=experimental",
         "session_id": f"probe-{secrets.token_hex(8)}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        "Origin": "https://chatgpt.com",
+        "Referer": "https://chatgpt.com/",
+        "sec-ch-ua": '"Not(A:Brand";v="99", "Google Chrome";v="136", "Chromium";v="136"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
     }
 
     try:

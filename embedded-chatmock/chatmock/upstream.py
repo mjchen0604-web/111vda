@@ -526,6 +526,15 @@ def _start_chatgpt_backend_request(
         if _should_mutate_candidate_state() and isinstance(thread_session, dict):
             preferred_label = str(thread_session.get("candidate_label") or "").strip()
             preferred_source_path = str(thread_session.get("candidate_url") or "").strip()
+        
+        # If no preferred_label from thread_session, try to extract from Authorization header
+        if not preferred_label:
+            try:
+                auth_header = flask_request.headers.get("Authorization") or ""
+                if auth_header.lower().startswith("bearer "):
+                    preferred_label = auth_header[7:].strip()
+            except Exception:
+                pass
 
         candidate_attempt_limit = _candidate_attempt_limit_for_current_request(len(round_candidates))
         for idx in range(candidate_attempt_limit):
@@ -556,6 +565,12 @@ def _start_chatgpt_backend_request(
                 "chatgpt-account-id": account_id,
                 "OpenAI-Beta": "responses=experimental",
                 "session_id": prompt_cache_key,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+                "Origin": "https://chatgpt.com",
+                "Referer": "https://chatgpt.com/",
+                "sec-ch-ua": '"Not(A:Brand";v="99", "Google Chrome";v="136", "Chromium";v="136"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
             }
 
             slot_id = None
