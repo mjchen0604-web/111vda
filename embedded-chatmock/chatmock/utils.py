@@ -1124,10 +1124,6 @@ def _is_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> bool
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip() and label.strip() in _INVALID_AUTH_LABELS:
             return True
-        if isinstance(account_id, str) and account_id.strip() and account_id.strip() in _INVALID_AUTH_ACCOUNT_IDS:
-            return True
-    if isinstance(account_id, str) and account_id.strip():
-        return account_id.strip() in set(_invalid_auth_account_ids())
     return False
 
 
