@@ -732,6 +732,9 @@ def dashboard_action_upload_auths():
             if existing_account_id and existing_account_id not in account_id_to_path:
                 account_id_to_path[existing_account_id] = str(existing_path)
 
+    seen_account_ids: set[str] = set()
+    skipped_duplicates: int = 0
+
     for storage in incoming:
         try:
             data = storage.read()
@@ -741,6 +744,23 @@ def dashboard_action_upload_auths():
 
             account_id = _extract_account_id(payload)
             fingerprint = _auth_payload_fingerprint(payload)
+
+            # ── dedupe: skip files whose account_id we already processed in this batch ──
+            if account_id and account_id in seen_account_ids:
+                skipped_duplicates += 1
+                upload_results.append(
+                    {
+                        "filename": storage.filename or "unknown",
+                        "accountId": account_id,
+                        "action": "skipped_duplicate",
+                        "target": "",
+                        "previousTarget": "",
+                    }
+                )
+                continue
+            if account_id:
+                seen_account_ids.add(account_id)
+
             target: Optional[Path] = None
             action = "created"
             previous_path = ""
@@ -807,6 +827,7 @@ def dashboard_action_upload_auths():
             "results": upload_results,
             "created": sum(1 for item in upload_results if item.get("action") == "created"),
             "updated": sum(1 for item in upload_results if item.get("action") == "updated"),
+            "skipped_duplicates": skipped_duplicates,
             "replace": replace,
             "auth_files": os.environ.get("CHATGPT_LOCAL_AUTH_FILES", ""),
             "accounts_count": len(records),
