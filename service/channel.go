@@ -51,6 +51,11 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
+	// ChatCore channels point to local self-hosted backends (e.g. ChatMock);
+	// transient upstream errors should not auto-disable these channels.
+	if channelType == constant.ChannelTypeChatCore {
+		return false
+	}
 	if types.IsChannelError(err) {
 		return true
 	}

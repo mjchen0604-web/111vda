@@ -57,11 +57,20 @@ def _model_ids(expose_variants: bool) -> List[str]:
         ("gpt-5.1-codex-max", ["xhigh", "high", "medium", "low"]),
         ("gpt-5.1-codex-mini", []),
     ]
+    claude_models = [
+        "claude-opus-4.6",
+        "claude-opus-4.5",
+        "claude-sonnet-4.6",
+        "claude-sonnet-4.5",
+        "claude-haiku-4.5",
+        "claude-haiku-3-5",
+    ]
     out: List[str] = []
     for base, efforts in model_groups:
         out.append(base)
         if expose_variants:
             out.extend([f"{base}-{effort}" for effort in efforts])
+    out.extend(claude_models)
     return out
 
 
