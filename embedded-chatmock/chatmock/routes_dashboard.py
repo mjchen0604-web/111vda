@@ -706,7 +706,7 @@ def dashboard_action_upload_auths():
 
     # ── replace mode: nuke everything before writing new accounts ──
     if replace:
-        _purge_all_auth_state(auth_root=str(auth_root))
+        _purge_all_auth_state(auth_root=str(auth_root), settings_path=str(_settings_path()))
 
     written: List[str] = []
     errors: List[str] = []
