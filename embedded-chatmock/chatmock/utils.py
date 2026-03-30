@@ -1120,6 +1120,62 @@ def _clear_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> N
         _persist_dashboard_invalid_auth_account_ids(sorted(persisted))
 
 
+def _purge_all_auth_state(auth_root: str = "") -> None:
+    """Nuclear clean: clear ALL in-memory and persisted auth state.
+
+    Called when replace=True on upload.  Equivalent to the server-side:
+        rm -rf /data/chatmock-accounts/*
+        rm -f  /data/chatmock-dashboard-settings.json
+    but also wipes every in-memory set/dict so the running process
+    forgets old cooldowns, invalid markers, quarantine lists, etc.
+    """
+    import shutil
+
+    # 1. Clear in-memory invalid markers
+    with _INVALID_AUTH_LOCK:
+        _INVALID_AUTH_LABELS.clear()
+        _INVALID_AUTH_ACCOUNT_IDS.clear()
+
+    # 2. Clear in-memory pool state (cooldowns, rate-limit tracking, etc.)
+    with _AUTH_POOL_STATE_LOCK:
+        _AUTH_POOL_STATE.clear()
+
+    # 3. Clear in-memory session sticky bindings
+    with _AUTH_SESSION_STICKY_LOCK:
+        _AUTH_SESSION_STICKY.clear()
+
+    # 4. Clear in-memory inflight counts
+    with _AUTH_INFLIGHT_LOCK:
+        _AUTH_INFLIGHT_COUNTS.clear()
+
+    # 5. Reset round-robin index
+    global _AUTH_POOL_RR_INDEX
+    with _AUTH_POOL_RR_LOCK:
+        _AUTH_POOL_RR_INDEX = 0
+
+    # 6. Clear persisted quarantine and invalid account ID lists
+    _persist_dashboard_quarantined_auth_files([])
+    _persist_dashboard_invalid_auth_account_ids([])
+
+    # 7. Remove old acc* directories from disk
+    if auth_root:
+        root_path = os.path.expanduser(str(auth_root).strip())
+        if os.path.isdir(root_path):
+            for entry in os.listdir(root_path):
+                entry_path = os.path.join(root_path, entry)
+                if os.path.isdir(entry_path) and entry.lower().startswith("acc"):
+                    try:
+                        shutil.rmtree(entry_path)
+                    except Exception as exc:
+                        eprint(f"WARNING: failed to remove old account dir {entry_path}: {exc}")
+
+    # 8. Clear the auth files env so stale paths don't linger
+    os.environ.pop("CHATGPT_LOCAL_AUTH_FILES", None)
+    os.environ.pop("CHATGPT_LOCAL_AUTH_FILES_CONFIGURED", None)
+
+    eprint("INFO: purged all auth state (replace mode)")
+
+
 def _is_invalid_auth_candidate(*, label: str = "", account_id: str = "") -> bool:
     with _INVALID_AUTH_LOCK:
         if isinstance(label, str) and label.strip() and label.strip() in _INVALID_AUTH_LABELS:

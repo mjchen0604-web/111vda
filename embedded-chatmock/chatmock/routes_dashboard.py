@@ -16,6 +16,7 @@ from .utils import (
     _clear_quarantined_auth_paths,
     _invalid_auth_account_ids,
     _known_auth_file_paths,
+    _purge_all_auth_state,
     get_chatgpt_auth_records,
     get_chatgpt_runtime_candidate_records,
     get_max_retry_interval_seconds,
@@ -702,6 +703,11 @@ def dashboard_action_upload_auths():
         return make_response(jsonify({"ok": False, "error": "no files uploaded"}), 400)
 
     auth_root = _auth_storage_root()
+
+    # ── replace mode: nuke everything before writing new accounts ──
+    if replace:
+        _purge_all_auth_state(auth_root=str(auth_root))
+
     written: List[str] = []
     errors: List[str] = []
     upload_results: List[Dict[str, Any]] = []
@@ -738,9 +744,8 @@ def dashboard_action_upload_auths():
             target: Optional[Path] = None
             action = "created"
             previous_path = ""
-
+            
             if account_id and account_id in invalid_account_ids:
-                _clear_invalid_auth_candidate(account_id=account_id)
                 invalid_account_ids.discard(account_id)
 
             if not replace and fingerprint in fingerprint_to_path:
@@ -758,6 +763,9 @@ def dashboard_action_upload_auths():
                 fingerprint_to_path[fingerprint] = str(target)
                 if account_id:
                     account_id_to_path[account_id] = str(target)
+
+            resolved_label = target.parent.name if target else ""
+            _clear_invalid_auth_candidate(account_id=account_id or "", label=resolved_label)
 
             _write_auth_payload(target, payload)
             _clear_quarantined_auth_paths([str(target)])
